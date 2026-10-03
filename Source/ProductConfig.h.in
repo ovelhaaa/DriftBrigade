@@ -1,0 +1,2 @@
+#pragma once
+namespace drift { inline constexpr const char* productName = "@DRIFT_PRODUCT_NAME@"; }

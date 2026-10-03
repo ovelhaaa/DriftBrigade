@@ -1,0 +1,39 @@
+# M1 research notes
+
+All five supplied PDFs were inspected before DSP implementation. Page numbers below are PDF pages (not conference pagination). This is a paraphrased implementation ledger, not a claim that our complete algorithm appears in any paper.
+
+## Modulated delay and interpolation
+
+**PAPER-BACKED BEHAVIOR:** `modulation and time based effects(1).pdf`, Disch/Zölzer, pp. 1–2, classifies variable delay as phase modulation with a frequency-modulation consequence. Section 2.2 decomposes delay into integer and fractional portions and discusses linear, spline and all-pass interpolation. `chorus-flange-quality-enhancements(1).pdf`, Fernández-Cid/Casajús-Quirós, pp. 1–3, connects chorus/flange through variable delay, short flange centers (roughly 0–10 ms), longer chorus centers (10–40 ms), feedback resonance and interpolation error. Windowed sinc has an accuracy/cost/minimum-delay tradeoff.
+
+**ENGINEERING INTERPRETATION / DESIGN CHOICE:** Four-point cubic Hermite (Catmull-Rom) is a low-cost M1 compromise, not the paper's windowed-sinc implementation. It is not ideally bandlimited, especially near Nyquist. Delay is expressed in seconds at a contained engine boundary; reads use bounded sample positions. Center spans 0.3–30 ms. Slewed controls avoid pointer jumps; a hard emergency limiter is transparent below its threshold and is not analog coloration.
+
+## Organic motion
+
+**PAPER-BACKED BEHAVIOR:** `chorus-flange-quality-enhancements(1).pdf`, pp. 3–4, section 5 generates random points at a low adjustable rate, uses a raised-cosine transition to audio rate, and optionally multiplies this process by a cosine to position its spectrum. Flat transition endpoints avoid value and slope jumps and uncontrolled polynomial overshoot.
+
+**ENGINEERING INTERPRETATION / DESIGN CHOICE:** We use deterministic xorshift32 uniform targets, a continuous phase accumulator (two random targets per nominal Motion cycle), and `(1-cos(pi*t))/2`. Rate changes preserve phase. Chaos morphs the control itself between a sine and the interpolated process, with a theoretical variance normalization. We do not implement the paper's spectral-shifting multiplication. Independent sources have seeded phases and slightly different rates. Note a mathematical correction to the paper's broad smoothness wording: arbitrary adjacent cosine segments are C1, generally not C2 or infinitely differentiable. Only C1 is promised and tested.
+
+## Rate/depth evidence and scope
+
+**PAPER-BACKED BEHAVIOR:** `CLASSIFICATION OF MODULATION EFFECTS (1).pdf` is actually Martens/Marui's *Categories of perception for vibrato, flange, and stereo chorus* (2006). Page 2 describes one compressed/overdriven guitar note, rates 2, 3, 4, 6, 9 Hz, five peak depths 40–1000 us, 1.4 s stimuli and simple sinusoidal modulation. Page 3 describes 25 young computer-science students without strong musical backgrounds and a fixed effect-task order. Page 4, figure 2, fits lower depth `814/rate - 66` us (2–9 Hz) and upper `4800/rate - 350` us only at 4, 6, 9 Hz. No upper boundary was observed at 2 and 3 Hz. The authors explicitly limit generalization by stimulus and participant scope.
+
+**ENGINEERING INTERPRETATION / DESIGN CHOICE:** Motion 0.05–10 Hz is a musical extension. At 4–9 Hz the middle Depth range interpolates geometrically between fitted bounds; endpoints allow zero and twice the upper bound. Below 4 Hz an independently chosen maximum blends continuously from 5 ms at slow rates to twice the 4 Hz upper fit; no upper fit is evaluated below 4 Hz. Above 9 Hz the 9 Hz mapping is held constant. Short centers and the analytic modulation bound further restrict physical excursion. These equations guide nominal excursion, not perception of a non-sinusoidal, multiband effect. A raw mapping switch is available only for offline comparison.
+
+## Multiscale and coherence
+
+**PAPER-BACKED BEHAVIOR:** `chorus-flange-quality-enhancements(1).pdf`, pp. 4–5, section 7 contrasts multiple fullband voices with one delayed version distributed across a filterbank. Their bank is dyadic/octave based. Independent modulation per scale reduces harmonically locked metallic movement; a shared law restores flange-like character. Per-scale envelope tracking is also explored.
+
+**ENGINEERING INTERPRETATION / DESIGN CHOICE:** Four bands use complementary residuals of parallel one-pole TPT lowpasses at 250, 1000, 4000 Hz. Their telescoping sum reconstructs the input sample exactly, without an all-pass phase error or latency. Slopes are intentionally gentle and bands overlap; this differs from the paper's bank and from Linkwitz–Riley. Coherence weights are `C` and `sqrt(1-C²)`, preserving expected variance of independent zero-mean sources. A separately seeded right-channel component provides controlled stereo decorrelation. Neither weighting law is from the paper. No center spread is used in M1.
+
+## Envelope interaction
+
+**PAPER-BACKED BEHAVIOR:** `chorus-flange-quality-enhancements(1).pdf`, p. 4, section 6 recommends using original-input envelope to reduce processed contribution at low level while retaining the original signal, in contrast to gating the whole effect. Page 5, section 8 proposes envelope-driven randomness, feedback and center delay.
+
+**ENGINEERING INTERPRETATION / DESIGN CHOICE:** A stereo-linked peak envelope with 15 ms attack / 250 ms release plus 50 ms control smoothing changes Chaos by at most 0.2, feedback by at most 0.08, and wet prominence by at most 55%. Original dry gain remains `1-Mix`. We use one broadband detector, not per-band tracking, and do not modulate center from the envelope. These amounts and time constants are ours; freedom from perceptible pumping still requires listening.
+
+## Future BBD preparation only
+
+**PAPER-BACKED BEHAVIOR:** `bbd modeling (1).pdf`, Raffel/Smith (2010), pp. 1–2 covers stages, two-phase clock, input/output filters and delay `N/(2*fclock)`; pp. 3–5 covers filter modeling, companding, clocked resampling, insertion gain, noise and nonlinearity; pp. 6–7 discusses nonlinear fitting and its limitations. `BBD filters model (1).pdf`, Holters/Parker (2018), pp. 1–4 develops fixed-stage variable-rate sampling with surrounding filters used for asynchronous resampling; p. 6 shows why abruptly changing BBD clock differs from abruptly moving a digital read pointer; pp. 5–8 compares Juno-60 response, gain, aliasing and oversampling. These are distinct physical models, not ordinary digital delay with saturation added.
+
+**ENGINEERING INTERPRETATION / DESIGN CHOICE:** A concrete contained `DelayPath` owns the M1 digital delay and feedback, with `prepare/reset/process(input, delaySeconds, feedback)` as the replacement boundary. A future clocked engine must maintain stage/clock history internally; simply converting seconds to instantaneous clock is not enough to reproduce transit behavior. No BBD clock, noise, companding, transistor model, or circuit filter is simulated in M1.
