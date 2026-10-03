@@ -18,16 +18,61 @@ struct Correlation {
     double value() const { return (xy-x*y/n)/std::sqrt((xx-x*x/n)*(yy-y*y/n)); }
 };
 void reconstruction(double sr) {
-    MultiscaleBank bank; bank.prepare(sr); Random rng; rng.reset(14);
-    double squared=0,peak=0;
-    for (int i=0; i<100000; ++i) {
-        const double x=i==0 ? 1.0 : 2*rng.next()-1;
-        const auto bands=bank.process(x); const double error=bands[0]+bands[1]+bands[2]+bands[3]-x;
-        squared+=error*error; peak=std::max(peak,std::abs(error));
+    for(auto mode:{BankMode::Gentle,BankMode::Selective}) {
+      MultiscaleBank bank; bank.setMode(mode); bank.prepare(sr); Random rng; rng.reset(14);
+      double squared=0,peak=0;
+      for (int i=0; i<100000; ++i) {
+          const double x=i==0 ? 1.0 : 2*rng.next()-1;
+          const auto bands=bank.process(x); const double error=bands[0]+bands[1]+bands[2]+bands[3]-x;
+          squared+=error*error; peak=std::max(peak,std::abs(error));
+      }
+      const double rms=std::sqrt(squared/100000);
+      require(peak<1e-14 && rms<1e-15,"filterbank reconstruction");
+      std::cout << (mode==BankMode::Gentle?"gentle":"selective") << " reconstruction " << sr << " Hz: RMS=" << rms << " peak=" << peak << '\n';
     }
-    const double rms=std::sqrt(squared/100000);
-    require(peak<1e-14 && rms<1e-15,"filterbank reconstruction");
-    std::cout << "reconstruction " << sr << " Hz: RMS=" << rms << " peak=" << peak << '\n';
+}
+void variantQualification() {
+    constexpr int samples=960000;
+    std::array<std::vector<double>,3> captures;
+    int index=0;
+    for(auto variant:{OrganicVariant::Wander,OrganicVariant::PaperNarrowband,OrganicVariant::PhaseDrift}) {
+        OrganicModulator a,b,different;a.prepare(48000);b.prepare(48000);different.prepare(48000);
+        a.setVariant(variant);b.setVariant(variant);different.setVariant(variant);a.reset(77);b.reset(77);different.reset(78);
+        captures[index].reserve(48000);double seedDifference=0,sum=0,sq=0,peak=0,maxStep=0;
+        double previous=a.process(2,.65);require(previous==b.process(2,.65),"variant seed determinism");different.process(2,.65);
+        for(int i=1;i<samples;++i) {
+            const double chaos=.65;
+            const double rate=i<samples/2?2.:6.; const double x=a.process(rate,chaos);
+            require(x==b.process(rate,chaos),"variant seed determinism");seedDifference+=std::abs(x-different.process(rate,chaos));
+            require(std::abs(x)<=OrganicModulator::maximumMagnitude(variant)+1e-12,"variant analytical bound");
+            maxStep=std::max(maxStep,std::abs(x-previous));previous=x;
+            if(i>48000){sum+=x;sq+=x*x;} if(i<48000)captures[index].push_back(x);peak=std::max(peak,std::abs(x));
+        }
+        require(seedDifference>10,"variant seed differentiation");require(maxStep<.003,"variant parameter continuity");
+        const double count=samples-48000,mean=sum/count,rms=std::sqrt(sq/count-mean*mean);
+        require(rms>.5&&rms<1.0,"variant RMS sanity");
+        std::cout<<"variant "<<index<<" RMS="<<rms<<" peak="<<peak<<" max step="<<maxStep<<'\n';++index;
+
+        OrganicModulator automated;automated.prepare(48000);automated.setVariant(variant);automated.reset(77);
+        double autoPrevious=automated.process(),autoStep=0;
+        for(int i=1;i<240000;++i){if(i==40000)automated.setRate(10);if(i==90000)automated.setChaos(1);if(i==150000){automated.setRate(.05);automated.setChaos(.1);}const double x=automated.process();autoStep=std::max(autoStep,std::abs(x-autoPrevious));autoPrevious=x;}
+        require(autoStep<.006,"variant smoothed Motion/Chaos continuity");
+    }
+    // All strategies use precisely the original sine when Chaos is zero.
+    OrganicModulator zeroA,zeroB,zeroC;zeroA.prepare(48000);zeroB.prepare(48000);zeroC.prepare(48000);
+    zeroA.setVariant(OrganicVariant::Wander);zeroB.setVariant(OrganicVariant::PaperNarrowband);zeroC.setVariant(OrganicVariant::PhaseDrift);
+    zeroA.reset(91);zeroB.reset(91);zeroC.reset(91);
+    for(int n=0;n<100000;++n){const double x=zeroA.process(.7,0);require(x==zeroB.process(.7,0)&&x==zeroC.process(.7,0),"Chaos-zero baseline mismatch");}
+
+    double commonExcursion=-1;
+    for(auto variant:{OrganicVariant::Wander,OrganicVariant::PaperNarrowband,OrganicVariant::PhaseDrift}) {
+        DriftEngine engine;EngineParameters p;p[Motion]=.7;p[Depth]=.5;p[Center]=15;
+        engine.setParameters(p);engine.setOrganicVariant(variant);engine.prepare(48000,91);engine.processSample(0,0);
+        const auto& trace=engine.telemetry();
+        require(trace.requestedExcursionSeconds==trace.actualExcursionSeconds,"bake-off excursion safety clamp");
+        if(commonExcursion<0)commonExcursion=trace.actualExcursionSeconds;
+        require(trace.actualExcursionSeconds==commonExcursion,"variant excursion mismatch");
+    }
 }
 void modulation() {
     // Endpoint and adjacent segment derivatives, not merely small audio sample steps.
@@ -45,7 +90,7 @@ void modulation() {
         if (i==140000) { a.setRate(0.05); b.setRate(0.05); c.setRate(0.05); }
         const auto phase=a.segmentPhase(); const double x=a.process();
         require(x==b.process(),"modulator seed determinism"); difference+=std::abs(x-c.process());
-        require(std::abs(x)<=OrganicModulator::maximumMagnitude+1e-12,"morph analytic bound");
+        require(std::abs(x)<=OrganicModulator::wanderMaximumMagnitude+1e-12,"morph analytic bound");
         if (i>0) maxStep=std::max(maxStep,std::abs(x-previous));
         if (a.segmentPhase()<phase) boundaryStep=std::max(boundaryStep,std::abs(a.randomValue()-previousRandom));
         previous=x; previousRandom=a.randomValue();
@@ -124,11 +169,11 @@ void boundsAndSafety(double sr) {
     p[Mix]=0.5; e.setParameters(p); e.reset();
     for (int i=0; i<100; ++i) { const auto out=e.processSample(std::numeric_limits<float>::max(),-std::numeric_limits<float>::max()); for(double y:out) require(std::isfinite(static_cast<float>(y)),"float overflow"); }
 }
-std::vector<float> render(double sr, std::size_t block, std::uint32_t seed, bool dry=false, bool mono=false) {
+std::vector<float> render(double sr, std::size_t block, std::uint32_t seed, bool dry=false, bool mono=false, OrganicVariant variant=OrganicVariant::Wander) {
     constexpr std::size_t count=12000;
     std::vector<float> left(count),right(count);
     for(std::size_t i=0;i<count;++i) { left[i]=static_cast<float>(0.4*std::sin(2*pi*220*i/sr)); right[i]=static_cast<float>(0.3*std::sin(2*pi*333*i/sr)); }
-    DriftEngine e; EngineParameters p; p[Mix]=dry ? 0 : 0.7; e.setParameters(p); e.prepare(sr,seed);
+    DriftEngine e; EngineParameters p; p[Mix]=dry ? 0 : 0.7; e.setParameters(p); e.setOrganicVariant(variant); e.prepare(sr,seed);
     std::size_t pos=0;
     while(pos<count) {
         if(pos==4096) { p[Motion]=10; p[Center]=0.3; p[Chaos]=1; p[Coherence]=0; p[Depth]=1; e.setParameters(p); }
@@ -151,6 +196,8 @@ void segmentation(double sr) {
         require(dry[i+12000]==static_cast<float>(0.3*std::sin(2*pi*333*i/sr)),"dry right invariant");
     }
     const auto mono=render(sr,17,501,false,true); require(mono==render(sr,1024,501,false,true),"mono segmentation");
+    for(auto variant:{OrganicVariant::PaperNarrowband,OrganicVariant::PhaseDrift})
+        require(render(sr,1,501,false,false,variant)==render(sr,511,501,false,false,variant),"variant block segmentation");
     std::cout << "block sizes 1/17/64/127/256/511/1024/16384 bit identical at " << sr << " Hz; no process allocations\n";
 }
 void stereoAndDynamics() {
@@ -217,7 +264,7 @@ void mappingAndAutomation() {
 int main() {
     try {
         const auto start=std::chrono::steady_clock::now();
-        modulation(); coherence(); stereoAndDynamics(); lockedFullbandEquivalence(); mappingAndAutomation();
+        modulation(); variantQualification(); coherence(); stereoAndDynamics(); lockedFullbandEquivalence(); mappingAndAutomation();
         for(double sr : {44100.,48000.,88200.,96000.}) { reconstruction(sr); delayInterpolation(sr); boundsAndSafety(sr); segmentation(sr); }
         std::cout << "PASS: M1 DSP qualification (" << std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count() << " s)\n";
         return 0;

@@ -14,6 +14,10 @@ All five supplied PDFs were inspected before DSP implementation. Page numbers be
 
 **ENGINEERING INTERPRETATION / DESIGN CHOICE:** We use deterministic xorshift32 uniform targets, a continuous phase accumulator (two random targets per nominal Motion cycle), and `(1-cos(pi*t))/2`. Rate changes preserve phase. Chaos morphs the control itself between a sine and the interpolated process, with a theoretical variance normalization. We do not implement the paper's spectral-shifting multiplication. Independent sources have seeded phases and slightly different rates. Note a mathematical correction to the paper's broad smoothness wording: arbitrary adjacent cosine segments are C1, generally not C2 or infinitely differentiable. Only C1 is promised and tested.
 
+**M1.1 PAPER-BACKED BEHAVIOR:** Experimental Variant B exercises the paper's optional multiplication of the DC-centered, raised-cosine random process by a cosine carrier. Its carrier phase, one-random-target-per-cycle relationship, clean-sine blend, and RMS scaling are engineering choices, not values specified by the paper.
+
+**M1.1 ENGINEERING EXPERIMENT:** Variant C integrates a smoothly perturbed instantaneous rate. This phase-drift strategy is ours and is not attributed to either paper. Variant A remains the unchanged production default; B and C are offline bake-off choices only.
+
 ## Rate/depth evidence and scope
 
 **PAPER-BACKED BEHAVIOR:** `CLASSIFICATION OF MODULATION EFFECTS (1).pdf` is actually Martens/Marui's *Categories of perception for vibrato, flange, and stereo chorus* (2006). Page 2 describes one compressed/overdriven guitar note, rates 2, 3, 4, 6, 9 Hz, five peak depths 40–1000 us, 1.4 s stimuli and simple sinusoidal modulation. Page 3 describes 25 young computer-science students without strong musical backgrounds and a fixed effect-task order. Page 4, figure 2, fits lower depth `814/rate - 66` us (2–9 Hz) and upper `4800/rate - 350` us only at 4, 6, 9 Hz. No upper boundary was observed at 2 and 3 Hz. The authors explicitly limit generalization by stimulus and participant scope.
