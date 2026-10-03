@@ -44,10 +44,10 @@ Files 01–06 now use Motion .7 Hz, Depth .5, and Center 15 ms. Requested nomina
 |---|---:|---:|
 | A, Chaos .5 | 1.69717 / 1.22762 | 2.14486 / 1.55124 |
 | B, Chaos .5 | 1.03930 / .78437 | 2.14486 / 1.58279 |
-| C, Chaos .5 | 2.93958 / 1.14798 | 2.14486 / 1.52965 |
+| C, Chaos .5 | 1.69717 / 1.14798 | 2.14486 / 1.52965 |
 | A, high Chaos | 1.69717 / 1.20324 | 2.14486 / 1.51946 |
 | B, high Chaos | 1.03930 / .70964 | 2.14486 / 1.50628 |
-| C, high Chaos | 2.93958 / 1.05596 | 2.14486 / 1.34044 |
+| C, high Chaos | 1.69717 / 1.05596 | 2.14486 / 1.34044 |
 
 The same requested and actual excursion is used for each comparison; remaining RMS differences are produced by control character rather than safety clamping.
 

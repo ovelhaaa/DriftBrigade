@@ -15,8 +15,13 @@ void word(std::ofstream& f,std::uint32_t x,int bytes){for(int i=0;i<bytes;++i)f.
 struct Wav {
     std::ofstream f; std::uint32_t frames=0; double peak=0; std::uint64_t clipped=0;
     explicit Wav(const std::filesystem::path& p):f(p,std::ios::binary){f.seekp(44);}
-    void add(double l,double r){for(double x:{l,r}){peak=std::max(peak,std::abs(x));if(std::abs(x)>1)++clipped;auto s=static_cast<std::int16_t>(std::clamp(x,-1.,1.)*32767);word(f,static_cast<std::uint16_t>(s),2);}++frames;}
-    ~Wav(){if(!f)return;const auto bytes=frames*4;f.seekp(0);f.write("RIFF",4);word(f,36+bytes,4);f.write("WAVEfmt ",8);word(f,16,4);word(f,1,2);word(f,2,2);word(f,sampleRate,4);word(f,sampleRate*4,4);word(f,4,2);word(f,16,2);f.write("data",4);word(f,bytes,4);}
+    bool isOpen() const noexcept { return f.is_open() && static_cast<bool>(f); }
+    bool add(double l,double r){for(double x:{l,r}){peak=std::max(peak,std::abs(x));if(std::abs(x)>1)++clipped;auto s=static_cast<std::int16_t>(std::clamp(x,-1.,1.)*32767);word(f,static_cast<std::uint16_t>(s),2);}++frames;return static_cast<bool>(f);}
+    bool finish(){
+        if(!f.is_open()||!f)return false;
+        const auto bytes=frames*4;f.seekp(0);f.write("RIFF",4);word(f,36+bytes,4);f.write("WAVEfmt ",8);word(f,16,4);word(f,1,2);word(f,2,2);word(f,sampleRate,4);word(f,sampleRate*4,4);word(f,4,2);word(f,16,2);f.write("data",4);word(f,bytes,4);
+        f.flush();const bool written=static_cast<bool>(f);f.close();return written&&!f.fail();
+    }
 };
 enum class Source { Comparison, Broadband, Dynamic };
 double source(Source kind,int n) {
@@ -35,7 +40,7 @@ double source(Source kind,int n) {
 drift::EngineParameters settings(double chaos=.55) {
     drift::EngineParameters p;p[drift::Motion]=.7;p[drift::Depth]=.7;p[drift::Center]=7;p[drift::Chaos]=chaos;p[drift::Coherence]=.45;p[drift::Dynamics]=.25;p[drift::Feedback]=.2;p[drift::Mix]=.65;p[drift::Width]=.45;return p;
 }
-struct RenderResult { double requested=0,actual=0,delayRms=0,peak=0;std::uint64_t clipped=0; };
+struct RenderResult { double requested=0,actual=0,delayRms=0,peak=0;std::uint64_t clipped=0;bool success=false; };
 RenderResult render(const std::filesystem::path& dir,const std::string& name,drift::OrganicVariant variant,double chaos,Source sourceType,
             double coherence=.45,drift::BankMode bank=drift::BankMode::Gentle,drift::DynamicsMode dynamics=drift::DynamicsMode::Current,bool telemetry=false) {
     auto p=settings(chaos);p[drift::Coherence]=coherence;
@@ -43,15 +48,20 @@ RenderResult render(const std::filesystem::path& dir,const std::string& name,dri
     if(name.find("Coherence")!=std::string::npos){p[drift::Width]=0;p[drift::Center]=1.5;p[drift::Feedback]=.4;}
     if(name.find("Bank_")!=std::string::npos){p[drift::Width]=0;p[drift::Center]=3;p[drift::Feedback]=.3;}
     drift::DriftEngine e;e.setParameters(p);e.setOrganicVariant(variant);e.setBankMode(bank);e.setDynamicsMode(dynamics);e.prepare(sampleRate,seed);
-    Wav wav(dir/(name+".wav"));std::ofstream csv;if(telemetry){csv.open(dir/(name+".csv"));csv<<"time,organic_control,mod_l0,mod_l1,mod_l2,mod_l3,delay_l0,delay_l1,delay_l2,delay_l3,requested_excursion_s,actual_excursion_s,envelope,effective_chaos,effective_feedback,carrier,random_envelope,instantaneous_rate,phase_derivative\n"<<std::setprecision(12);}
-    const int frames=12*sampleRate;double delaySquared=0;std::uint64_t delayCount=0;RenderResult result;
+    Wav wav(dir/(name+".wav"));RenderResult result;
+    if(!wav.isOpen()){std::cerr<<"Cannot open WAV for "<<name<<'\n';return result;}
+    std::ofstream csv;if(telemetry){csv.open(dir/(name+".csv"));if(!csv){std::cerr<<"Cannot open CSV for "<<name<<'\n';return result;}csv<<"time,organic_control,mod_l0,mod_l1,mod_l2,mod_l3,delay_l0,delay_l1,delay_l2,delay_l3,requested_excursion_s,actual_excursion_s,envelope,effective_chaos,effective_feedback,carrier,random_envelope,instantaneous_rate,phase_derivative\n"<<std::setprecision(12);}
+    const int frames=12*sampleRate;double delaySquared=0;std::uint64_t delayCount=0;
     for(int n=0;n<frames;++n){
-        double x=source(sourceType,n);auto y=e.processSample(x,x);const auto&t=e.telemetry();wav.add(.55*y[0],.55*y[1]);
+        double x=source(sourceType,n);auto y=e.processSample(x,x);const auto&t=e.telemetry();if(!wav.add(.55*y[0],.55*y[1])){std::cerr<<"WAV write failed for "<<name<<'\n';return result;}
         result.requested=t.requestedExcursionSeconds;result.actual=t.actualExcursionSeconds;
         for(const auto& channel:t.delaySeconds)for(double delay:channel){const double offset=delay-p[drift::Center]*.001;delaySquared+=offset*offset;++delayCount;}
         if(telemetry&&n%48==0){csv<<n/double(sampleRate)<<','<<t.organic;for(double v:t.modulation[0])csv<<','<<v;for(double v:t.delaySeconds[0])csv<<','<<v;csv<<','<<t.requestedExcursionSeconds<<','<<t.actualExcursionSeconds<<','<<t.envelope<<','<<t.effectiveChaos<<','<<t.effectiveFeedback<<','<<t.organicDiagnostics.carrier<<','<<t.organicDiagnostics.randomEnvelope<<','<<t.organicDiagnostics.instantaneousRate<<','<<t.organicDiagnostics.phaseDerivative<<'\n';}
     }
+    if(telemetry){csv.flush();if(!csv){std::cerr<<"CSV write failed for "<<name<<'\n';return result;}csv.close();if(csv.fail()){std::cerr<<"CSV close failed for "<<name<<'\n';return result;}}
     result.delayRms=std::sqrt(delaySquared/delayCount);result.peak=wav.peak;result.clipped=wav.clipped;
+    if(!wav.finish()){std::cerr<<"WAV finalization failed for "<<name<<'\n';return result;}
+    result.success=true;
     std::cout<<"WAV "<<name<<" peak="<<result.peak<<" clipped_samples="<<result.clipped<<" requested_excursion_ms="<<result.requested*1000<<" actual_excursion_ms="<<result.actual*1000<<" delay_rms_ms="<<result.delayRms*1000<<'\n';
     return result;
 }
@@ -67,17 +77,17 @@ void statistics(){
 }
 }
 int main(int argc,char**argv){
-    const std::filesystem::path dir=argc>1?argv[1]:"bakeoff";std::filesystem::create_directories(dir);
-    std::uint64_t clipped=0;auto add=[&](RenderResult result){clipped+=result.clipped;};
-    add(render(dir,"01_A_Wander",drift::OrganicVariant::Wander,.5,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true));
-    add(render(dir,"02_B_PaperNarrowband",drift::OrganicVariant::PaperNarrowband,.5,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true));
-    add(render(dir,"03_C_PhaseDrift",drift::OrganicVariant::PhaseDrift,.5,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true));
-    add(render(dir,"04_A_Wander_HighChaos",drift::OrganicVariant::Wander,1,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true));
-    add(render(dir,"05_B_PaperNarrowband_HighChaos",drift::OrganicVariant::PaperNarrowband,1,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true));
-    add(render(dir,"06_C_PhaseDrift_HighChaos",drift::OrganicVariant::PhaseDrift,1,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true));
-    add(render(dir,"07_Coherence_0",drift::OrganicVariant::Wander,.6,Source::Broadband,0));add(render(dir,"08_Coherence_50",drift::OrganicVariant::Wander,.6,Source::Broadband,.5));add(render(dir,"09_Coherence_100",drift::OrganicVariant::Wander,.6,Source::Broadband,1));
-    add(render(dir,"10_Bank_Gentle_Coh0",drift::OrganicVariant::Wander,.65,Source::Broadband,0));add(render(dir,"11_Bank_Selective_Coh0",drift::OrganicVariant::Wander,.65,Source::Broadband,0,drift::BankMode::Selective));add(render(dir,"12_Bank_Gentle_Coh100",drift::OrganicVariant::Wander,.65,Source::Broadband,1));add(render(dir,"13_Bank_Selective_Coh100",drift::OrganicVariant::Wander,.65,Source::Broadband,1,drift::BankMode::Selective));
-    add(render(dir,"14_Dynamics_Current",drift::OrganicVariant::Wander,.45,Source::Dynamic,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current));add(render(dir,"15_Dynamics_MotionOnly",drift::OrganicVariant::Wander,.45,Source::Dynamic,.45,drift::BankMode::Gentle,drift::DynamicsMode::MotionOnly));
-    std::ofstream guide(dir/"README.txt");guide<<"DRIFT BRIGADE M1.1 deterministic bake-off (48 kHz stereo).\nNo file is independently normalized. Compare matched numbered groups; see docs/m1_1_listening_guide.md in the repository.\nSections in files 01-06: harmonic, plucked/transient, deterministic broadband. Seed: 0x4d313142.\n";
+    const std::filesystem::path dir=argc>1?argv[1]:"bakeoff";std::error_code error;std::filesystem::create_directories(dir,error);if(error){std::cerr<<"Cannot create output directory: "<<error.message()<<'\n';return 1;}
+    std::uint64_t clipped=0;auto add=[&](RenderResult result){if(!result.success)return false;clipped+=result.clipped;return true;};
+    if(!add(render(dir,"01_A_Wander",drift::OrganicVariant::Wander,.5,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true)))return 1;
+    if(!add(render(dir,"02_B_PaperNarrowband",drift::OrganicVariant::PaperNarrowband,.5,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true)))return 1;
+    if(!add(render(dir,"03_C_PhaseDrift",drift::OrganicVariant::PhaseDrift,.5,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true)))return 1;
+    if(!add(render(dir,"04_A_Wander_HighChaos",drift::OrganicVariant::Wander,1,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true)))return 1;
+    if(!add(render(dir,"05_B_PaperNarrowband_HighChaos",drift::OrganicVariant::PaperNarrowband,1,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true)))return 1;
+    if(!add(render(dir,"06_C_PhaseDrift_HighChaos",drift::OrganicVariant::PhaseDrift,1,Source::Comparison,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current,true)))return 1;
+    if(!add(render(dir,"07_Coherence_0",drift::OrganicVariant::Wander,.6,Source::Broadband,0)))return 1;if(!add(render(dir,"08_Coherence_50",drift::OrganicVariant::Wander,.6,Source::Broadband,.5)))return 1;if(!add(render(dir,"09_Coherence_100",drift::OrganicVariant::Wander,.6,Source::Broadband,1)))return 1;
+    if(!add(render(dir,"10_Bank_Gentle_Coh0",drift::OrganicVariant::Wander,.65,Source::Broadband,0)))return 1;if(!add(render(dir,"11_Bank_Selective_Coh0",drift::OrganicVariant::Wander,.65,Source::Broadband,0,drift::BankMode::Selective)))return 1;if(!add(render(dir,"12_Bank_Gentle_Coh100",drift::OrganicVariant::Wander,.65,Source::Broadband,1)))return 1;if(!add(render(dir,"13_Bank_Selective_Coh100",drift::OrganicVariant::Wander,.65,Source::Broadband,1,drift::BankMode::Selective)))return 1;
+    if(!add(render(dir,"14_Dynamics_Current",drift::OrganicVariant::Wander,.45,Source::Dynamic,.45,drift::BankMode::Gentle,drift::DynamicsMode::Current)))return 1;if(!add(render(dir,"15_Dynamics_MotionOnly",drift::OrganicVariant::Wander,.45,Source::Dynamic,.45,drift::BankMode::Gentle,drift::DynamicsMode::MotionOnly)))return 1;
+    std::ofstream guide(dir/"README.txt");if(!guide){std::cerr<<"Cannot open README.txt\n";return 1;}guide<<"DRIFT BRIGADE M1.1 deterministic bake-off (48 kHz stereo).\nNo file is independently normalized. Compare matched numbered groups; see docs/m1_1_listening_guide.md in the repository.\nSections in files 01-06: harmonic, plucked/transient, deterministic broadband. Seed: 0x4d313142.\n";guide.flush();if(!guide){std::cerr<<"README.txt write failed\n";return 1;}guide.close();if(guide.fail()){std::cerr<<"README.txt close failed\n";return 1;}
     statistics();if(clipped!=0){std::cerr<<"FAIL: "<<clipped<<" pre-PCM-clamp samples exceeded unity\n";return 1;}std::cout<<"Rendered bake-off to "<<dir<<"; all WAVs clip-free\n";
 }
