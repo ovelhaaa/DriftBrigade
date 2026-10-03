@@ -52,3 +52,14 @@ On Windows use `build-dsp\drift_analysis.exe`. Each run exports eight seconds of
 Optional offline plotting: install `matplotlib` in your analysis Python environment and run `python tools/plot_analysis.py output/organic.csv`. This is not a runtime dependency. On Linux/Clang or GCC, use `-DDRIFT_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug` for AddressSanitizer/UBSan; the compiler must include sanitizer runtimes.
 
 See [research notes](docs/research_notes.md), [architecture](docs/architecture.md) and [qualification report](docs/m1_report.md). Hosted CI builds the core on Windows/macOS/Linux, runs sanitizers on Linux and builds/tests the plugin on Windows. Listening and host qualification remain distinct from numerical tests.
+
+## BBD device-character qualification (M2.2)
+
+Production continues to use `DigitalFractionalDelay`. Internal BBD character defaults to exact bypass; nonzero qualification fixtures are explicitly engineering approximations, not device calibration. See [M2.2 device-character report](docs/m2_2_bbd_device_character.md) and the [research ledger](docs/research_notes.md).
+
+```sh
+build-dsp/drift_bbd_character_tests
+build-dsp/drift_bbd_character_qualification output/DriftBrigade-M2.2-BBD-Character-Qualification
+```
+
+On Windows append `.exe`. The generator checks response decomposition, broad-band noise spectra and bounded feedback, and checks every artifact stream's finalization. CI uploads `DriftBrigade-M2.2-BBD-Character-Qualification` independently of the preserved M2.1 artifact.

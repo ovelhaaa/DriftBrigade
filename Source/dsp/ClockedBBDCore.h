@@ -1,6 +1,7 @@
 #pragma once
 #include "DspMath.h"
 #include "AsyncAnalogFilter.h"
+#include "BBDDeviceCharacter.h"
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -27,6 +28,9 @@ public:
     // Qualification only: configure before prepare/reset. Clock updates never
     // change coefficients, signal memory, phase, hold or filter state.
     void setQualificationMode(BBDMode mode,BBDFilterProfile profile=BBDFilterProfile::ValidationPrototype) noexcept;
+    // Internal qualification configuration: set before prepare.
+    void setCharacterConfig(BBDCharacterConfig config) noexcept { character.configure(config); }
+    const BBDDeviceCharacter& deviceCharacter() const noexcept { return character; }
     double process(double input) noexcept;
     const BBDTelemetry& telemetry() const noexcept { return trace; }
     double stageValue(std::size_t logicalStage) const noexcept;
@@ -42,6 +46,7 @@ private:
     bool capturePhase=true;
     BBDMode mode=BBDMode::TransportOnly;
     AsyncAnalogFilter inputFilter,outputFilter;
+    BBDDeviceCharacter character;
     BBDTelemetry trace;
 };
 }

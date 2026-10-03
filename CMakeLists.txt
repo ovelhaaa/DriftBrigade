@@ -37,6 +37,18 @@ add_test(NAME bbd_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
   -DTOOL=$<TARGET_FILE:drift_bbd_qualification>
   -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-stream-tests
   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+add_executable(drift_bbd_character_tests tests/BBDCharacterTests.cpp)
+target_link_libraries(drift_bbd_character_tests PRIVATE drift_dsp)
+add_test(NAME bbd_device_character_qualification COMMAND drift_bbd_character_tests)
+add_executable(drift_bbd_character_qualification tools/BBDCharacterQualification.cpp)
+target_link_libraries(drift_bbd_character_qualification PRIVATE drift_dsp)
+add_test(NAME bbd_device_character_measurements COMMAND drift_bbd_character_qualification
+  ${CMAKE_CURRENT_BINARY_DIR}/bbd-character-measurements)
+add_test(NAME bbd_character_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_character_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-character-stream-tests
+  -DBLOCKED_ARTIFACT=bbd_device_gain.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
 if(DRIFT_BUILD_PLUGIN)
   include(FetchContent)
   # JUCE 7.0.12 retains MinGW support for this workspace's native toolchain.
