@@ -22,12 +22,12 @@ void ClockedBBDCore::setDelaySeconds(double seconds) noexcept {
     const double minimum = static_cast<double>(trace.stageCount)
                          / (sampleRate * maximumEventsPerHostSample);
     const double maximum = static_cast<double>(trace.stageCount) / 2.0;
-    trace.requestedDelaySeconds = std::clamp(std::isfinite(seconds) ? seconds : maximum,
-                                             minimum, maximum);
+    const bool finiteRequest = std::isfinite(seconds);
+    trace.requestedDelaySeconds = finiteRequest ? seconds : maximum;
+    trace.effectiveDelaySeconds = std::clamp(trace.requestedDelaySeconds, minimum, maximum);
+    trace.wasClamped = !finiteRequest || trace.effectiveDelaySeconds != trace.requestedDelaySeconds;
     trace.effectiveClockHz = static_cast<double>(trace.stageCount)
-                           / (2.0 * trace.requestedDelaySeconds);
-    trace.effectiveTransportDelaySeconds = static_cast<double>(trace.stageCount)
-                                         / (2.0 * trace.effectiveClockHz);
+                           / (2.0 * trace.effectiveDelaySeconds);
 }
 double ClockedBBDCore::transfer(double input) noexcept {
     // head is the final/oldest logical stage. Retire it, replace it with the

@@ -56,6 +56,20 @@ void eventCounts() {
     }
 }
 
+void telemetrySemantics() {
+    ClockedBBDCore core; core.prepare(48000, 256);
+    core.setDelaySeconds(-0.25);
+    require(core.telemetry().requestedDelaySeconds == -0.25, "raw delay request telemetry");
+    require(core.telemetry().effectiveDelaySeconds == 256.0/(48000.0*ClockedBBDCore::maximumEventsPerHostSample), "minimum effective delay telemetry");
+    require(core.telemetry().wasClamped, "minimum delay clamp telemetry");
+    core.setDelaySeconds(0.01);
+    require(core.telemetry().requestedDelaySeconds == 0.01 && core.telemetry().effectiveDelaySeconds == 0.01, "unclamped delay telemetry");
+    require(!core.telemetry().wasClamped, "unclamped diagnostic telemetry");
+    core.setDelaySeconds(1000.0);
+    require(core.telemetry().requestedDelaySeconds == 1000.0 && core.telemetry().effectiveDelaySeconds == 128.0, "maximum effective delay telemetry");
+    require(core.telemetry().wasClamped, "maximum delay clamp telemetry");
+}
+
 void variableAndStep() {
     ClockedBBDCore core; core.prepare(48000,256); core.setDelaySeconds(.01);
     bool inserted=false; std::uint64_t previous=0; double previousPhase=0; bool phaseMoved=false;
@@ -90,7 +104,7 @@ void safetyAndAllocation() {
 int main(){try{
     for(double sr:{44100.,48000.,88200.,96000.}) for(std::size_t stages:{256u,512u,1024u,2048u,4096u})
         for(double delay:{.003,.01,.03}) constantDelay(sr,stages,delay);
-    segmentation(); eventCounts(); variableAndStep(); safetyAndAllocation();
+    segmentation(); eventCounts(); telemetrySemantics(); variableAndStep(); safetyAndAllocation();
     std::cout<<"PASS: M2.0 fixed-stage BBD transport; all rates/stages, exact transit events, block invariant\n";
     return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

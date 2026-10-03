@@ -9,12 +9,13 @@ namespace drift {
 // Telemetry is a snapshot only; reading it never changes scheduler state.
 struct BBDTelemetry {
     double requestedDelaySeconds = 0.0;
+    double effectiveDelaySeconds = 0.0;
     double effectiveClockHz = 0.0;
     std::size_t stageCount = 0;
     double accumulatedClockPhase = 0.0; // phase of the next transfer event [0, 1)
     std::uint32_t eventsThisHostSample = 0;
     std::uint64_t totalEventCount = 0;
-    double effectiveTransportDelaySeconds = 0.0;
+    bool wasClamped = false;
 };
 
 // Temporary M2.0 boundaries. They deliberately do no spectral shaping.
