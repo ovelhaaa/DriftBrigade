@@ -6,6 +6,14 @@ constexpr std::array<double, 4> independentRates {0.91, 1.037, 1.083, 0.967};
 constexpr std::array<double, 4> stereoRates {1.113, 0.943, 1.057, 0.887};
 constexpr double dynamicsChaos = 0.20, dynamicsFeedback = 0.08, quietWetReduction = 0.55;
 }
+void DriftEngine::setOrganicVariant(OrganicVariant value) noexcept {
+    organicVariant=value; common.setVariant(value);
+    for(auto& m: independent) m.setVariant(value);
+    for(auto& m: stereo) m.setVariant(value);
+}
+void DriftEngine::setBankMode(BankMode value) noexcept {
+    bankMode=value; for(auto& b:banks) b.setMode(value);
+}
 void DriftEngine::prepare(double sr, std::uint32_t seed) {
     sampleRate = bounded(sr, 44100, 192000);
     for (auto& c : controls) c.prepare(sampleRate);
@@ -46,14 +54,17 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
     trace.effectiveChaos = unit(p[Chaos]+dynamicsChaos*p[Dynamics]*intensity);
     trace.effectiveFeedback = std::min(0.75, p[Feedback]+dynamicsFeedback*p[Dynamics]*intensity);
     trace.wetProminence = 1-quietWetReduction*p[Dynamics]*(1-intensity);
+    if (dynamicsMode == DynamicsMode::MotionOnly) trace.wetProminence = 1;
     trace.organic = common.process(p[Motion], trace.effectiveChaos);
     trace.randomControl = common.randomValue();
+    trace.organicDiagnostics = common.diagnostics();
     const double independentWeight = std::sqrt(std::max(0.0, 1-p[Coherence]*p[Coherence]));
     const double stereoShared = 1-0.35*p[Width];
     const double stereoWeight = std::sqrt(std::max(0.0, 1-stereoShared*stereoShared));
     const double center = p[Center]*0.001;
     const double minimumDelay = 4.0/sampleRate;
-    const double excursion = std::min(depthSeconds(p[Motion], p[Depth], perceptualDepth), (center-minimumDelay)*0.85/modulationBound);
+    const double bound = organicVariant == OrganicVariant::PaperNarrowband ? 5.656854249492381 : modulationBound;
+    const double excursion = std::min(depthSeconds(p[Motion], p[Depth], perceptualDepth), (center-minimumDelay)*0.85/bound);
     const auto lb = banks[0].process(left), rb = banks[1].process(right);
     std::array<double, 2> wet {};
     for (std::size_t b=0; b<4; ++b) {

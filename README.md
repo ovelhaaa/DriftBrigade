@@ -2,6 +2,19 @@
 
 M1: four complementary bands, one digital modulated delay per band/channel, seeded smooth random motion, periodic/organic morph, band coherence, envelope interaction and bounded feedback. No BBD emulation is included.
 
+## M1.1 listening bake-off
+
+Generate the deterministic 48 kHz stereo set without JUCE:
+
+```sh
+cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target drift_bakeoff
+./build/drift_bakeoff output/m1_1_bakeoff
+```
+
+GitHub Actions publishes the same set as `DriftBrigade-M1.1-Bakeoff`.
+Generated WAV files are intentionally not committed.
+
 ## Build
 
 Requires CMake 3.22+, C++17 and a native compiler. The core/tests require no JUCE, network or plugin host:

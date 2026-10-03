@@ -24,6 +24,8 @@ target_link_libraries(drift_tests PRIVATE drift_dsp)
 add_test(NAME dsp_qualification COMMAND drift_tests)
 add_executable(drift_analysis tools/Analysis.cpp)
 target_link_libraries(drift_analysis PRIVATE drift_dsp)
+add_executable(drift_bakeoff tools/Bakeoff.cpp)
+target_link_libraries(drift_bakeoff PRIVATE drift_dsp)
 if(DRIFT_BUILD_PLUGIN)
   include(FetchContent)
   # JUCE 7.0.12 retains MinGW support for this workspace's native toolchain.
