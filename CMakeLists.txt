@@ -66,3 +66,30 @@ if(DRIFT_BUILD_PLUGIN)
   target_link_libraries(drift_plugin_tests PRIVATE DriftBrigade juce::juce_audio_utils)
   add_test(NAME plugin_state_and_routing COMMAND drift_plugin_tests)
 endif()
+
+# Separate instrumented DSP compilation: no reference or counters in drift_dsp.
+add_executable(drift_bbd_performance_qualification tools/BBDPerformanceQualification.cpp
+  Source/dsp/ClockedBBDCore.cpp tests/reference/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_performance_qualification PRIVATE Source)
+target_compile_definitions(drift_bbd_performance_qualification PRIVATE DRIFT_BBD_INSTRUMENT=1)
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_performance_qualification PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_performance_qualification PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_performance_numerical COMMAND drift_bbd_performance_qualification
+  ${CMAKE_CURRENT_BINARY_DIR}/bbd-performance-numerical --numerical-only)
+add_test(NAME bbd_performance_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_performance_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-performance-stream-tests
+  -DBLOCKED_ARTIFACT=async_filter_reference_error.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+
+# MinGW Clang native TLS for inline thread_local counters fails with this GNU runtime.
+# Confine emulated TLS to the allocation-test executables.
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  foreach(test_target drift_tests drift_bbd_tests drift_bbd_character_tests drift_bbd_performance_qualification drift_plugin_tests)
+    if(TARGET ${test_target})
+      target_compile_options(${test_target} PRIVATE -femulated-tls)
+    endif()
+  endforeach()
+endif()

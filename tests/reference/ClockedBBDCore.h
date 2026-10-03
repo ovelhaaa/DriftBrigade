@@ -1,11 +1,11 @@
 #pragma once
-#include "DspMath.h"
+#include "dsp/DspMath.h"
 #include "AsyncAnalogFilter.h"
 #include "BBDDeviceCharacter.h"
 #include <cstdint>
 #include <limits>
 #include <vector>
-namespace drift {
+namespace drift_reference {
 enum class BBDMode { TransportOnly, AsyncLinearReference };
 enum class BBDFilterProfile { ValidationPrototype, HoltersParkerTable1 };
 struct BBDTelemetry {
@@ -26,7 +26,7 @@ public:
     void reset() noexcept;
     void setDelaySeconds(double seconds) noexcept;
     // Qualification only: configure before prepare/reset. Clock updates never
-    // preserve signal memory, phase, hold and filter state while rebuilding caches.
+    // change coefficients, signal memory, phase, hold or filter state.
     void setQualificationMode(BBDMode mode,BBDFilterProfile profile=BBDFilterProfile::ValidationPrototype) noexcept;
     // Internal qualification configuration: set before prepare.
     void setCharacterConfig(BBDCharacterConfig config) noexcept { character.configure(config); }
@@ -50,10 +50,9 @@ private:
     bool capturePhase=true;
     BBDMode mode=BBDMode::TransportOnly;
     AsyncAnalogFilter inputFilter,outputFilter;
-    AsyncAnalogTransition inputHost,outputHost,inputPeriod,outputPeriod;
-    double cachedClock=-1;
-    void rebuildTransitions() noexcept;
     BBDDeviceCharacter character;
     BBDTelemetry trace;
 };
 }
+
+

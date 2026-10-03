@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-namespace drift {
+namespace drift_reference {
 void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     if(stages<2 || stages>65536 || stages%2) throw std::invalid_argument("BBD physical stages must be even, in [2,65536]");
     trace.hostRateWasNormalized=!std::isfinite(hostSampleRate) || hostSampleRate<minimumHostSampleRate || hostSampleRate>maximumHostSampleRate;
@@ -10,7 +10,6 @@ void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     storage.assign(stages/2,0.0);
     trace.stageCount=stages; trace.logicalSignalBuckets=storage.size();
     character.prepare(stages);
-    cachedClock=-1; rebuildTransitions();
     reset(); setDelaySeconds(static_cast<double>(stages)/(2.0*sampleRate));
 }
 void ClockedBBDCore::setQualificationMode(BBDMode selected,BBDFilterProfile profile) noexcept {
@@ -18,15 +17,6 @@ void ClockedBBDCore::setQualificationMode(BBDMode selected,BBDFilterProfile prof
     if(profile==BBDFilterProfile::HoltersParkerTable1) {
         inputFilter.paperReference(false); outputFilter.paperReference(true);
     } else { inputFilter.prototype(2000.0); outputFilter.prototype(2000.0); }
-    rebuildTransitions();
-}
-void ClockedBBDCore::rebuildTransitions() noexcept {
-    inputHost=inputFilter.makeTransition(1.0/sampleRate);
-    outputHost=outputFilter.makeTransition(1.0/sampleRate);
-    if(cachedClock>0 && mode==BBDMode::AsyncLinearReference) {
-        inputPeriod=inputFilter.makeTransition(1.0/cachedClock);
-        outputPeriod=outputFilter.makeTransition(1.0/cachedClock);
-    }
 }
 void ClockedBBDCore::reset() noexcept {
     std::fill(storage.begin(),storage.end(),0.0);
@@ -48,14 +38,7 @@ void ClockedBBDCore::setDelaySeconds(double seconds) noexcept {
     trace.effectiveClockHz=static_cast<double>(trace.stageCount)/(2.0*trace.effectiveDelaySeconds);
     trace.signalSamplingRateHz=trace.effectiveClockHz;
     trace.signalNyquistHz=trace.effectiveClockHz/2.0;
-    if(cachedClock!=trace.effectiveClockHz) {
-        cachedClock=trace.effectiveClockHz;
-        if(mode==BBDMode::AsyncLinearReference) {
-            inputPeriod=inputFilter.makeTransition(1.0/cachedClock);
-            outputPeriod=outputFilter.makeTransition(1.0/cachedClock);
-        }
-        character.update(cachedClock);
-    }
+    character.update(trace.effectiveClockHz);
 }
 double ClockedBBDCore::process(double input) noexcept {
     if(storage.empty()) return 0.0;
@@ -69,18 +52,15 @@ double ClockedBBDCore::process(double input) noexcept {
     // Input samples are weighted Dirac impulses at interval start (Eq.4).
     // Output is observed at interval end; events on the boundary run first.
     if(mode==BBDMode::AsyncLinearReference) inputFilter.injectImpulse(input*dt);
-    double inputElapsed=0.0,outputElapsed=0.0;
-    bool captured=false,outputUpdated=false;
+    double elapsed=0.0;
     for(std::uint32_t i=0;i<events;++i) {
         const double instant=std::clamp((1.0-oldPhase+i)/increment,0.0,1.0)*dt;
-
+        if(mode==BBDMode::AsyncLinearReference) {
+            inputFilter.advance(instant-elapsed); outputFilter.advance(instant-elapsed,held);
+        }
+        elapsed=instant;
         const double time=static_cast<double>(hostSamples)*dt+instant;
         if(capturePhase) {
-            if(mode==BBDMode::AsyncLinearReference) {
-                if(captured) { inputFilter.advanceWithTransition(inputPeriod); DRIFT_ASYNC_COUNT(periodApplications,1); }
-                else inputFilter.advance(instant);
-                captured=true; inputElapsed=instant;
-            }
             storage[head]=character.capture(mode==BBDMode::TransportOnly?input:inputFilter.value());
             if(++head==storage.size()) head=0;
             ++trace.totalCaptureCount; ++trace.capturesThisHostSample;
@@ -88,11 +68,6 @@ double ClockedBBDCore::process(double input) noexcept {
         } else {
             // Eq.1: sample captured at t_n exits at t_(n+N-1).
             // The combined output holds this value for the next two edges.
-            if(mode==BBDMode::AsyncLinearReference) {
-                if(outputUpdated) { outputFilter.advanceWithTransition(outputPeriod,held); DRIFT_ASYNC_COUNT(periodApplications,1); }
-                else outputFilter.advance(instant,held);
-                outputUpdated=true; outputElapsed=instant;
-            }
             held=character.transfer(storage[head]);
             ++trace.totalOutputCount; ++trace.outputsThisHostSample;
             trace.lastOutputTimeSeconds=time;
@@ -100,10 +75,7 @@ double ClockedBBDCore::process(double input) noexcept {
         capturePhase=!capturePhase;
     }
     if(mode==BBDMode::AsyncLinearReference) {
-        if(captured) inputFilter.advance(dt-inputElapsed);
-        else inputFilter.advanceWithTransition(inputHost);
-        if(outputUpdated) outputFilter.advance(dt-outputElapsed,held);
-        else outputFilter.advanceWithTransition(outputHost,held);
+        inputFilter.advance(dt-elapsed); outputFilter.advance(dt-elapsed,held);
     }
     ++hostSamples; trace.totalEventCount+=events;
     trace.accumulatedClockPhase=eventPhase; trace.nextEdgeCaptures=capturePhase;
@@ -120,3 +92,4 @@ bool ClockedBBDCore::finiteState() const noexcept {
     return true;
 }
 }
+
