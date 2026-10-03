@@ -28,8 +28,14 @@ public:
     double segmentPhase() const noexcept { return randomPhase; }
     const OrganicDiagnostics& diagnostics() const noexcept { return diagnostic; }
     static double raisedCosine(double t) noexcept { return 0.5 - 0.5*std::cos(pi*t); }
-    // B's normalized blend is the largest analytical bound (2 sqrt(2)).
-    static constexpr double maximumMagnitude = 2.8284271247461903;
+    static constexpr double wanderMaximumMagnitude = 1.7320508075688772;
+    static constexpr double paperNarrowbandMaximumMagnitude = 2.8284271247461903;
+    static constexpr double phaseDriftMaximumMagnitude = 1.0;
+    static constexpr double maximumMagnitude(OrganicVariant value) noexcept {
+        return value == OrganicVariant::Wander ? wanderMaximumMagnitude
+             : value == OrganicVariant::PaperNarrowband ? paperNarrowbandMaximumMagnitude
+             : phaseDriftMaximumMagnitude;
+    }
 private:
     Random random; ParameterSmoother rate, chaos;
     OrganicVariant variant = OrganicVariant::Wander;

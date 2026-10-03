@@ -63,8 +63,10 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
     const double stereoWeight = std::sqrt(std::max(0.0, 1-stereoShared*stereoShared));
     const double center = p[Center]*0.001;
     const double minimumDelay = 4.0/sampleRate;
-    const double bound = organicVariant == OrganicVariant::PaperNarrowband ? 5.656854249492381 : modulationBound;
-    const double excursion = std::min(depthSeconds(p[Motion], p[Depth], perceptualDepth), (center-minimumDelay)*0.85/bound);
+    const double bound = combinedModulationBound(organicVariant);
+    trace.requestedExcursionSeconds = depthSeconds(p[Motion], p[Depth], perceptualDepth);
+    trace.actualExcursionSeconds = std::min(trace.requestedExcursionSeconds, (center-minimumDelay)*0.85/bound);
+    const double excursion = trace.actualExcursionSeconds;
     const auto lb = banks[0].process(left), rb = banks[1].process(right);
     std::array<double, 2> wet {};
     for (std::size_t b=0; b<4; ++b) {

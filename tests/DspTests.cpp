@@ -44,7 +44,7 @@ void variantQualification() {
             const double chaos=.65;
             const double rate=i<samples/2?2.:6.; const double x=a.process(rate,chaos);
             require(x==b.process(rate,chaos),"variant seed determinism");seedDifference+=std::abs(x-different.process(rate,chaos));
-            require(std::abs(x)<=OrganicModulator::maximumMagnitude+1e-12,"variant analytical bound");
+            require(std::abs(x)<=OrganicModulator::maximumMagnitude(variant)+1e-12,"variant analytical bound");
             maxStep=std::max(maxStep,std::abs(x-previous));previous=x;
             if(i>48000){sum+=x;sq+=x*x;} if(i<48000)captures[index].push_back(x);peak=std::max(peak,std::abs(x));
         }
@@ -63,6 +63,16 @@ void variantQualification() {
     zeroA.setVariant(OrganicVariant::Wander);zeroB.setVariant(OrganicVariant::PaperNarrowband);zeroC.setVariant(OrganicVariant::PhaseDrift);
     zeroA.reset(91);zeroB.reset(91);zeroC.reset(91);
     for(int n=0;n<100000;++n){const double x=zeroA.process(.7,0);require(x==zeroB.process(.7,0)&&x==zeroC.process(.7,0),"Chaos-zero baseline mismatch");}
+
+    double commonExcursion=-1;
+    for(auto variant:{OrganicVariant::Wander,OrganicVariant::PaperNarrowband,OrganicVariant::PhaseDrift}) {
+        DriftEngine engine;EngineParameters p;p[Motion]=.7;p[Depth]=.5;p[Center]=15;
+        engine.setParameters(p);engine.setOrganicVariant(variant);engine.prepare(48000,91);engine.processSample(0,0);
+        const auto& trace=engine.telemetry();
+        require(trace.requestedExcursionSeconds==trace.actualExcursionSeconds,"bake-off excursion safety clamp");
+        if(commonExcursion<0)commonExcursion=trace.actualExcursionSeconds;
+        require(trace.actualExcursionSeconds==commonExcursion,"variant excursion mismatch");
+    }
 }
 void modulation() {
     // Endpoint and adjacent segment derivatives, not merely small audio sample steps.
@@ -80,7 +90,7 @@ void modulation() {
         if (i==140000) { a.setRate(0.05); b.setRate(0.05); c.setRate(0.05); }
         const auto phase=a.segmentPhase(); const double x=a.process();
         require(x==b.process(),"modulator seed determinism"); difference+=std::abs(x-c.process());
-        require(std::abs(x)<=OrganicModulator::maximumMagnitude+1e-12,"morph analytic bound");
+        require(std::abs(x)<=OrganicModulator::wanderMaximumMagnitude+1e-12,"morph analytic bound");
         if (i>0) maxStep=std::max(maxStep,std::abs(x-previous));
         if (a.segmentPhase()<phase) boundaryStep=std::max(boundaryStep,std::abs(a.randomValue()-previousRandom));
         previous=x; previousRandom=a.randomValue();

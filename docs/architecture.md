@@ -28,6 +28,8 @@ Feedback returns the previous interpolated wet sample to the delay input; a symm
 
 M1.1 names that unchanged path `Wander`. Internal-only `PaperNarrowband` multiplies a smooth random envelope (one target per Motion cycle) by the continuous Motion carrier and blends it with the sine. `PhaseDrift` updates its smooth random target at half Motion and integrates `Motion*(1+0.75*Chaos*random)`; it changes timing, never oscillator amplitude. All three return the identical sine at Chaos=0. These enum choices are neither serialized nor exposed to the plug-in, whose default remains Wander.
 
+Their analytical source bounds are respectively `sqrt(3)`, `2*sqrt(2)`, and `1`. The engine retains a conservative combined bound of twice the selected source bound: each of the coherence and stereo variance-preserving weighted sums can contribute at most a `sqrt(2)` magnitude factor. Bounds therefore remain variant-specific rather than weakening Wander/PhaseDrift qualification to B's larger range.
+
 ## Coherence and stereo
 
 For each band, `base=C*common+sqrt(1-C*C)*independent`. Band-independent sources have rates 0.91/1.037/1.083/0.967 times Motion and distinct seeded phases/targets. At C=1 all left bands move identically; at C=0 they use independent streams. At intermediate C, pairwise correlation tends toward C² for statistically independent components. Expected variance is preserved. The independent/shared perceptual contrast is **sourced from paper** (pp. 4–5); this law and ratios are ours.
