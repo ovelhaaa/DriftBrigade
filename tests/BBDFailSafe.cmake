@@ -1,3 +1,6 @@
+if(NOT DEFINED BLOCKED_ARTIFACT)
+  set(BLOCKED_ARTIFACT bbd_phase_semantics.csv)
+endif()
 # Every path is inside an isolated build directory; no recursive deletion.
 file(MAKE_DIRECTORY "${OUTPUT_ROOT}")
 file(WRITE "${OUTPUT_ROOT}/blocked-file" "not a directory")
@@ -5,7 +8,7 @@ execute_process(COMMAND "${TOOL}" "${OUTPUT_ROOT}/blocked-file" RESULT_VARIABLE 
 if(result EQUAL 0)
   message(FATAL_ERROR "Qualification accepted a file as its output directory")
 endif()
-file(MAKE_DIRECTORY "${OUTPUT_ROOT}/blocked-stream/bbd_phase_semantics.csv")
+file(MAKE_DIRECTORY "${OUTPUT_ROOT}/blocked-stream/${BLOCKED_ARTIFACT}")
 execute_process(COMMAND "${TOOL}" "${OUTPUT_ROOT}/blocked-stream" RESULT_VARIABLE result)
 if(result EQUAL 0)
   message(FATAL_ERROR "Qualification accepted an unopenable artifact")

@@ -9,6 +9,7 @@ void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     sampleRate=trace.hostRateWasNormalized?48000.0:hostSampleRate;
     storage.assign(stages/2,0.0);
     trace.stageCount=stages; trace.logicalSignalBuckets=storage.size();
+    character.prepare(stages);
     reset(); setDelaySeconds(static_cast<double>(stages)/(2.0*sampleRate));
 }
 void ClockedBBDCore::setQualificationMode(BBDMode selected,BBDFilterProfile profile) noexcept {
@@ -20,7 +21,7 @@ void ClockedBBDCore::setQualificationMode(BBDMode selected,BBDFilterProfile prof
 void ClockedBBDCore::reset() noexcept {
     std::fill(storage.begin(),storage.end(),0.0);
     head=0; eventPhase=0.0; held=0.0; hostSamples=0; capturePhase=true;
-    inputFilter.reset(); outputFilter.reset();
+    inputFilter.reset(); outputFilter.reset(); character.reset();
     trace.eventsThisHostSample=trace.capturesThisHostSample=trace.outputsThisHostSample=0;
     trace.totalEventCount=trace.totalCaptureCount=trace.totalOutputCount=0;
     trace.lastCaptureTimeSeconds=trace.lastOutputTimeSeconds=0.0;
@@ -37,6 +38,7 @@ void ClockedBBDCore::setDelaySeconds(double seconds) noexcept {
     trace.effectiveClockHz=static_cast<double>(trace.stageCount)/(2.0*trace.effectiveDelaySeconds);
     trace.signalSamplingRateHz=trace.effectiveClockHz;
     trace.signalNyquistHz=trace.effectiveClockHz/2.0;
+    character.update(trace.effectiveClockHz);
 }
 double ClockedBBDCore::process(double input) noexcept {
     if(storage.empty()) return 0.0;
@@ -59,14 +61,14 @@ double ClockedBBDCore::process(double input) noexcept {
         elapsed=instant;
         const double time=static_cast<double>(hostSamples)*dt+instant;
         if(capturePhase) {
-            storage[head]=mode==BBDMode::TransportOnly?input:inputFilter.value();
+            storage[head]=character.capture(mode==BBDMode::TransportOnly?input:inputFilter.value());
             if(++head==storage.size()) head=0;
             ++trace.totalCaptureCount; ++trace.capturesThisHostSample;
             trace.lastCaptureTimeSeconds=time;
         } else {
             // Eq.1: sample captured at t_n exits at t_(n+N-1).
             // The combined output holds this value for the next two edges.
-            held=storage[head];
+            held=character.transfer(storage[head]);
             ++trace.totalOutputCount; ++trace.outputsThisHostSample;
             trace.lastOutputTimeSeconds=time;
         }
@@ -85,7 +87,7 @@ double ClockedBBDCore::stageValue(std::size_t logicalStage) const noexcept {
 }
 bool ClockedBBDCore::finiteState() const noexcept {
     if(!std::isfinite(eventPhase) || !std::isfinite(held) || !std::isfinite(trace.effectiveClockHz)
-       || !std::isfinite(trace.effectiveDelaySeconds) || !inputFilter.finiteState() || !outputFilter.finiteState()) return false;
+       || !std::isfinite(trace.effectiveDelaySeconds) || !inputFilter.finiteState() || !outputFilter.finiteState() || !character.finiteState()) return false;
     for(double value:storage) if(!std::isfinite(value)) return false;
     return true;
 }
