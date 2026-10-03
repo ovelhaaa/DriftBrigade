@@ -24,22 +24,34 @@ public:
     std::size_t capacity() const noexcept { return buffer.size(); }
 private: std::vector<double> buffer; std::size_t writeIndex = 0; double sampleRate = 48000;
 };
-// Replace the contained engine here in M2; the bank and modulation know only seconds.
-class DelayPath {
+struct DigitalInputConditioner {
+    double process(double value) const noexcept { return value; }
+};
+struct DigitalOutputReconstruction {
+    double process(double value) const noexcept { return value; }
+};
+// Production voice boundary. M2.0 keeps this digital core selected; input and
+// reconstruction are explicit identity boundaries for later clocked variants.
+class ModulatedDelayVoice {
 public:
-    void prepare(double sr) { delay.prepare(sr); dcPole = std::exp(-2*pi*5.0/sr); reset(); }
-    void reset() noexcept { delay.reset(); previousWet = previousInput = dcState = 0; }
+    void prepare(double sr) { core.prepare(sr); dcPole = std::exp(-2*pi*5.0/sr); reset(); }
+    void reset() noexcept { core.reset(); previousWet = previousInput = dcState = 0; }
     double process(double input, double seconds, double feedback) noexcept {
         // Hermite absolute coefficient sum <= 1.25. 0.75*1.25 < 1,
         // plus hard limiting guarantees a bounded loop even under abusive input.
-        const double write = std::clamp(input + bounded(feedback, 0, 0.75)*previousWet, -16.0, 16.0);
-        const double wet = delay.process(write, seconds);
+        const double write = inputConditioner.process(std::clamp(input + bounded(feedback, 0, 0.75)*previousWet, -16.0, 16.0));
+        const double wet = reconstruction.process(core.process(write, seconds));
         previousWet = wet;
         // DC blocker on the output, outside the feedback loop.
         dcState = wet - previousInput + dcPole*dcState; previousInput = wet;
         return dcState;
     }
-    std::size_t capacity() const noexcept { return delay.capacity(); }
-private: DigitalFractionalDelay delay; double previousWet = 0, previousInput = 0, dcState = 0, dcPole = 0;
+    std::size_t capacity() const noexcept { return core.capacity(); }
+private:
+    DigitalInputConditioner inputConditioner;
+    DigitalFractionalDelay core;
+    DigitalOutputReconstruction reconstruction;
+    double previousWet = 0, previousInput = 0, dcState = 0, dcPole = 0;
 };
+using DelayPath = ModulatedDelayVoice;
 }

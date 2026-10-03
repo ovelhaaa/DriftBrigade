@@ -31,6 +31,19 @@ jobs:
         with:
           name: DriftBrigade-M1.1-Bakeoff
           path: artifact/
+  bbd-qualification:
+    needs: dsp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --config Release --target drift_bbd_tests drift_bbd_qualification --parallel 2
+      - run: ./build/drift_bbd_tests
+      - run: ./build/drift_bbd_qualification artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M2.0-BBD-Qualification
+          path: artifact/
   plugin:
     runs-on: windows-latest
     steps:
