@@ -24,13 +24,19 @@ target_link_libraries(drift_tests PRIVATE drift_dsp)
 add_test(NAME dsp_qualification COMMAND drift_tests)
 add_executable(drift_bbd_tests tests/BBDTests.cpp)
 target_link_libraries(drift_bbd_tests PRIVATE drift_dsp)
-add_test(NAME bbd_transport_qualification COMMAND drift_bbd_tests)
+add_test(NAME bbd_transport_qualification COMMAND drift_bbd_tests transport)
+add_test(NAME bbd_async_filter_qualification COMMAND drift_bbd_tests async)
+add_test(NAME bbd_aliasing_and_hold_qualification COMMAND drift_bbd_tests spectral)
 add_executable(drift_analysis tools/Analysis.cpp)
 target_link_libraries(drift_analysis PRIVATE drift_dsp)
 add_executable(drift_bakeoff tools/Bakeoff.cpp)
 target_link_libraries(drift_bakeoff PRIVATE drift_dsp)
 add_executable(drift_bbd_qualification tools/BBDQualification.cpp)
 target_link_libraries(drift_bbd_qualification PRIVATE drift_dsp)
+add_test(NAME bbd_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-stream-tests
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
 if(DRIFT_BUILD_PLUGIN)
   include(FetchContent)
   # JUCE 7.0.12 retains MinGW support for this workspace's native toolchain.
