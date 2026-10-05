@@ -93,3 +93,16 @@ if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     endif()
   endforeach()
 endif()
+
+add_executable(drift_bbd_nonlinear_qualification tools/BBDNonlinearQualification.cpp
+  tests/reference_m23/ClockedBBDCore.cpp)
+target_link_libraries(drift_bbd_nonlinear_qualification PRIVATE drift_dsp)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_nonlinear_qualification PRIVATE -femulated-tls)
+endif()
+add_test(NAME bbd_nonlinear_numerical COMMAND drift_bbd_nonlinear_qualification --tests-only)
+add_test(NAME bbd_nonlinear_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_nonlinear_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-nonlinear-stream-tests
+  -DBLOCKED_ARTIFACT=bbd_nonlinear_transfer_curve.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
