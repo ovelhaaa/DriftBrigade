@@ -45,9 +45,23 @@ public:
     const double bound = double(std::numeric_limits<float>::max());
     return std::clamp(x, -bound, bound);
   }
+  // Prevent subnormal arithmetic contributions without changing ordinary audio.
+  // Both operands are nonnegative. If each is >=2^-450, their product is
+  // normal; only the extreme numerical tail pays for the underflow-boundary
+  // division.
+  static double normalProduct(double a, double b) noexcept {
+    constexpr double normal = std::numeric_limits<double>::min();
+    if (a < 0x1p-450 || b < 0x1p-450) {
+      if (a < normal || b < normal)
+        return 0;
+      if (a < 1 && b <= normal / a)
+        return 0;
+    }
+    return a * b;
+  }
   double processMagnitude(double magnitude, double dt) noexcept {
     const double m = std::abs(admittedSignal(magnitude));
-    setLevel(alpha(dt) * m + beta(dt) * level);
+    setLevel(normalProduct(alpha(dt), m) + normalProduct(beta(dt), level));
     return level;
   }
   void setLevel(double value) noexcept { level = std::max(floor, value); }
@@ -68,12 +82,20 @@ public:
   }
   double process(double input, double dt) noexcept {
     const double x = CompanderLevelAverager::admittedSignal(input);
-    const double b = detector.beta(dt) * detector.value();
-    // L^2 - b L - alpha |x| = 0. The positive root has no cancellation.
-    const double level =
-        .5 * (b + std::sqrt(b * b + 4 * detector.alpha(dt) * std::abs(x)));
-    detector.setLevel(level);
+    if (std::isfinite(dt) && dt > 0) {
+      const double b = CompanderLevelAverager::normalProduct(detector.beta(dt),
+                                                             detector.value());
+      // L^2 - b L - alpha |x| = 0. The positive root has no cancellation.
+      const double level =
+          .5 * (b + std::sqrt(CompanderLevelAverager::normalProduct(b, b) +
+                              CompanderLevelAverager::normalProduct(
+                                  4 * detector.alpha(dt), std::abs(x))));
+      detector.setLevel(level);
+    }
     gain = 1 / detector.value();
+    if (detector.value() > 1 &&
+        std::abs(x) <= std::numeric_limits<double>::min() * detector.value())
+      return std::copysign(0., x);
     // Division rather than x*gain avoids an intermediate overflow at the floor.
     return x / detector.value();
   }
@@ -93,7 +115,10 @@ public:
   void reset(double initial = 1) noexcept { detector.reset(initial); }
   double process(double input, double dt) noexcept {
     const double x = CompanderLevelAverager::admittedSignal(input);
-    return detector.processMagnitude(std::abs(x), dt) * x;
+    return std::copysign(
+        CompanderLevelAverager::normalProduct(
+            detector.processMagnitude(std::abs(x), dt), std::abs(x)),
+        x);
   }
   const CompanderLevelAverager &levelAverager() const noexcept {
     return detector;

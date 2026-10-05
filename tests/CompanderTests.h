@@ -114,6 +114,20 @@ inline void mathematicalTests() {
   }
   BBDFeedbackCompressor c;
   BBDFeedforwardExpander e;
+  require(CompanderLevelAverager::normalProduct(.001, 1e-306) == 0,
+          "intermediate subnormal contribution flushed");
+  require(CompanderLevelAverager::normalProduct(.5, 1e-300) == .5e-300,
+          "normal tail product preserved");
+  for (double interval : {0., -1., double(NAN), double(INFINITY)}) {
+    const double previousC = c.levelAverager().value();
+    const double previousE = e.levelAverager().value();
+    require(std::isfinite(c.process(.4, interval)) &&
+                std::isfinite(e.process(.4, interval)),
+            "invalid interval finite");
+    require(same(previousC, c.levelAverager().value()) &&
+                same(previousE, e.levelAverager().value()),
+            "invalid interval holds state");
+  }
   c.configure(compConfig());
   e.configure(compConfig());
   const auto before = allocations.load();

@@ -67,6 +67,19 @@ float-magnitude boundary. Intermediate/output calculations remain double.
 Expander products can exceed float max during standalone extreme tests, but
 remain finite doubles; no silent clipping is performed there.
 
+Subnormal arithmetic contributions and subnormal final outputs are explicitly
+flushed before their multiply/divide operations. The fast check uses 2^-450:
+two operands above that bound have a normal product, so normal audio incurs no
+underflow-boundary division. In the numerical tail, a product below the minimum
+normal double contributes zero. This is an **ENGINEERING APPROXIMATION**, not a
+different RC law. In the supported host/event timebases, dropped quadratic terms
+are below 2.23e-308 apiece, compared
+with the floor square 9.33e-302; any relative detector perturbation is confined
+to the extreme floor neighborhood, far below the qualified -80 dB range. Normal
+tail products (e.g. .5e-300) remain intact. Subnormal compressor division results
+are detected from their numerator/denominator bound before dividing; sign is
+preserved when returning zero.
+
 Configuration validation uses finite capacitance 1e-12..1e-3 F, resistance
 1..1e6 ohms and floor 2^-500..1. Invalid settings fall back to nominal values.
 These are engineering numerical limits. No independent attack/release constants
@@ -254,10 +267,10 @@ balance changes stay below 4e-15 dB; filtered different-tone balance change is
 change among the tested filtered cases is .001085.
 
 Full character+nonlinear+compander stereo wall/audio factors span
-.00865-.05875; eight-core factors span .03456-.22488. Full-compander-only
-overhead over matching M2.4 spans -6.77%..11.68% stereo and -2.64%..11.51%
-eight-core. Full-character matching comparisons span -1.42%..11.17% stereo
-and -1.11%..14.45% eight-core. Negative short-window estimates indicate timing
+.00861-.05784; eight-core factors span .03473-.22837. Full-compander-only
+overhead over matching M2.4 spans .03%..16.73% stereo and -.95%..16.33%
+eight-core. Full-character matching comparisons span -.97%..16.52% stereo
+and -1.28%..16.32% eight-core. Negative short-window estimates indicate timing
 noise rather than a promised optimization. Detector updates for full companding
 are 192000/s stereo and 768000/s eight-core; compressor and expander each use
 half that count.
@@ -266,10 +279,10 @@ Eight-core full-character wall/audio factors (lower is better):
 
 | Stages | 3 ms | 10 ms | 30 ms |
 |---|---:|---:|---:|
-| 512 | .15097 | .08420 | .03456 |
-| 1024 | .16176 | .14780 | .06032 |
-| 2048 | .18030 | .15797 | .10636 |
-| 4096 | .22488 | .16530 | .15370 |
+| 512 | .15115 | .08214 | .03473 |
+| 1024 | .16024 | .14578 | .05835 |
+| 2048 | .18401 | .15204 | .10715 |
+| 4096 | .22837 | .16554 | .14898 |
 
 Stereo and eight-core measurements cover 512/1024/2048/4096 stages and
 3/10/30 ms. Cores are sequential independent DSP instances, not worker threads.
