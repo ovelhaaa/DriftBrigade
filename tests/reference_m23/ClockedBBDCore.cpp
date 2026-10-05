@@ -2,7 +2,8 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-namespace drift {
+namespace drift_m23 {
+using namespace drift;
 void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     if(stages<2 || stages>65536 || stages%2) throw std::invalid_argument("BBD physical stages must be even, in [2,65536]");
     trace.hostRateWasNormalized=!std::isfinite(hostSampleRate) || hostSampleRate<minimumHostSampleRate || hostSampleRate>maximumHostSampleRate;

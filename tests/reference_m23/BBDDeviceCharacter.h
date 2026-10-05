@@ -1,12 +1,12 @@
 #pragma once
-#include "AsyncOperationCounts.h"
-#include "BBDNonlinearTransfer.h"
+#include "dsp/AsyncOperationCounts.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-namespace drift {
+namespace drift_m23 {
+using namespace drift;
 enum class BBDCharacterMode { Ideal, LossOnly, NoiseOnly, FullLinearCharacter };
 struct BBDCharacterConfig {
   BBDCharacterMode mode = BBDCharacterMode::Ideal;
@@ -14,7 +14,6 @@ struct BBDCharacterConfig {
   double residualPolePer1024 = 0, inputNoiseRms = 0, outputNoiseRms = 0,
          mismatchFraction = 0;
   std::uint32_t seed = 1;
-  BBDNonlinearConfig nonlinear;
 };
 class BBDNoiseModel {
 public:
@@ -91,7 +90,6 @@ class BBDDeviceCharacter {
 public:
   void configure(BBDCharacterConfig value) noexcept {
     config = value;
-    nonlinear.configure(value.nonlinear);
     auto bound = [](double x, double lo, double hi) {
       return std::isfinite(x) ? std::clamp(x, lo, hi) : lo;
     };
@@ -114,7 +112,6 @@ public:
   }
   void reset() noexcept {
     loss.reset();
-    nonlinearEvaluations = 0;
     inputNoise.reset();
     outputNoise.reset();
   }
@@ -128,10 +125,6 @@ public:
                : x;
   }
   double transfer(double x) noexcept {
-    if (nonlinear.enabled()) {
-      x = nonlinear.process(x);
-      ++nonlinearEvaluations;
-    }
     if (lossEnabled())
       x = loss.process(x);
     if (config.mode == BBDCharacterMode::FullLinearCharacter)
@@ -153,8 +146,6 @@ public:
   }
   BBDDeviceLoss loss;
   BBDTransferImperfection mismatch;
-  BBDNonlinearTransfer nonlinear;
-  std::uint64_t nonlinearEvaluations = 0;
 
 private:
   BBDCharacterConfig config;
