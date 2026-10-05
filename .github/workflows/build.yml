@@ -92,3 +92,15 @@ jobs:
         with:
           name: DriftBrigade-M2.4-BBD-Nonlinear-Qualification
           path: artifact/
+  bbd-compander-qualification:
+    needs: [dsp, sanitize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target drift_bbd_compander_qualification --parallel 2
+      - run: ./build/drift_bbd_compander_qualification artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M2.5-BBD-Compander-Qualification
+          path: artifact/

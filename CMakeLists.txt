@@ -106,3 +106,22 @@ add_test(NAME bbd_nonlinear_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
   -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-nonlinear-stream-tests
   -DBLOCKED_ARTIFACT=bbd_nonlinear_transfer_curve.csv
   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+
+# Instrumentation and frozen M2.4 oracle are confined to qualification.
+add_executable(drift_bbd_compander_qualification tools/BBDCompanderQualification.cpp
+  Source/dsp/ClockedBBDCore.cpp tests/reference_m24/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_compander_qualification PRIVATE Source)
+target_compile_definitions(drift_bbd_compander_qualification PRIVATE DRIFT_BBD_INSTRUMENT=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_compander_qualification PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_compander_qualification PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_compander_qualification PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_compander_numerical COMMAND drift_bbd_compander_qualification --tests-only)
+add_test(NAME bbd_compander_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_compander_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-compander-stream-tests
+  -DBLOCKED_ARTIFACT=bbd_compander_static_ratio.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)

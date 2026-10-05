@@ -121,8 +121,8 @@ void tests() {
       }
       require(core.finiteState(), "core state");
       require(allocations.load() == before, "nonlinear allocations");
-      require(core.deviceCharacter().nonlinearEvaluations ==
-                  core.telemetry().totalOutputCount,
+      require(core.telemetry().totalOutputCount ==
+                  core.telemetry().totalEventCount / 2,
               "output event rate");
     }
   drift::ClockedBBDCore dc;
@@ -252,7 +252,8 @@ Timing timing(unsigned stages, double delay, int mode, int voices) {
   for (int v = 0; v < voices; ++v) {
     events += mode == 0 ? old[v].telemetry().totalEventCount
                         : cores[v].telemetry().totalEventCount;
-    evals += cores[v].deviceCharacter().nonlinearEvaluations;
+    evals += cores[v].deviceCharacter().nonlinear.enabled() ?
+                 cores[v].telemetry().totalOutputCount : 0;
   }
   return {seconds, events, evals};
 }
@@ -454,7 +455,7 @@ int main(int argc, char **argv) {
     for (int file : {8, 9}) {
       out[file] << "stages,delay_ms,voices,mode,realtime_factor,evaluations_"
                    "per_second,physical_events_per_second,overhead_percent_vs_"
-                   "linear,eight_core_factor\n";
+                   "linear,cpu_factor_vs_stereo_baseline\n";
       for (unsigned stages : {512u, 1024u, 2048u, 4096u})
         for (double delay : {.003, .01, .03}) {
           auto baseline = timing(stages, delay, 0, 2);
@@ -506,7 +507,7 @@ int main(int argc, char **argv) {
         << "Performance:48kHz,250ms per trial,median of 5; mode0 M2.3 "
            "FullLinearCharacter,1 NonlinearOnly,2 FullCharacter. Wall/audio "
            "lower is better. Event/evaluation rates are per audio second. "
-           "Eight-core factor relative to stereo linear baseline. Independent "
+           "CPU factor relative to stereo linear baseline (both schemas). Independent "
            "eight voices,not eight worker threads. Timing informational,never "
            "CI gated.\n"
         << "Tests: monotonic/derivative/memoryless,frozen M2.3 bit-identical "
