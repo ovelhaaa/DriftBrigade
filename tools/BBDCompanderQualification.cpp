@@ -355,15 +355,20 @@ void noiseAndNonlinear(std::ostream &noise, std::ostream &nonlinear) {
                           : drift::BBDCharacterConfig{};
       if (kind == 1 || kind == 3 || kind == 4)
         cc.nonlinear = {drift::BBDNonlinearityMode::EngineeringPolynomial, 1};
-      auto clean = cc;
-      clean.outputNoiseRms = 0;
-      clean.inputNoiseRms = 0;
       cc.mode = kind == 4 ? drift::BBDCharacterMode::FullLinearCharacter
                           : drift::BBDCharacterMode::NoiseOnly;
       cc.outputNoiseRms = 1e-4;
       cc.seed = 991;
+      auto clean = cc;
+      clean.outputNoiseRms = 0;
+      clean.inputNoiseRms = 0;
       Path noisy(kind >= 2 ? 2 : 0, .47e-6, 1024, .01, cc),
           quiet(kind >= 2 ? 2 : 0, .47e-6, 1024, .01, clean);
+      require(same(noisy.chain.core.deviceCharacter().mismatch.gain,
+                   quiet.chain.core.deviceCharacter().mismatch.gain) &&
+                  same(noisy.chain.core.deviceCharacter().loss.gain,
+                       quiet.chain.core.deviceCharacter().loss.gain),
+              "noise pairs preserve seeded mismatch and insertion gain");
       Metrics output, residual, intrinsic, nonlinearInput, added;
       drift::CompanderLevelAverager inputDetector;
       inputDetector.configure(compConfig());

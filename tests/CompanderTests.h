@@ -259,6 +259,7 @@ inline void coreTests() {
     cc.nonlinear = {BBDNonlinearityMode::EngineeringPolynomial, 1};
     chain.core.setCharacterConfig(cc);
     chain.prepare(48000, stages);
+    chain.core.collectOperatingStats = true;
     chain.setDelaySeconds(1e-12);
     auto before = allocations.load();
     for (int n = 0; n < 4000; ++n) {
@@ -291,6 +292,9 @@ inline void coreTests() {
                 std::isfinite(chain.compressor.currentGain()) &&
                 std::isfinite(chain.expander.currentGain()),
             "max event finite state");
+    require(chain.core.operatingStats.count > 0 &&
+                std::isfinite(chain.core.operatingStats.sumSquares),
+            "instrumented capture statistics finite");
     require(allocations.load() == before, "max event allocations");
   }
 }
