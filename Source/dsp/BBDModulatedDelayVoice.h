@@ -36,6 +36,10 @@ inline std::uint32_t bbdBandSeed(std::uint32_t base,
 }
 class BBDModulatedDelayVoice {
 public:
+#ifdef DRIFT_BBD_INSTRUMENT
+  // The core owns collection configuration; reset only clears measurements.
+  BBDModulatedDelayVoice() noexcept { path.core.collectOperatingStats = true; }
+#endif
   void prepare(double sr, const BBDVoiceConfig &c) {
     config = c;
     rate = sr;
@@ -57,7 +61,6 @@ public:
     previousWet = previousInput = dcState = 0;
 #ifdef DRIFT_BBD_INSTRUMENT
     hiddenClamps = numericalGuards = 0;
-    path.core.collectOperatingStats = true;
 #endif
   }
   double process(double input, double seconds, double feedback) noexcept {
