@@ -195,7 +195,7 @@ CTest; the existing Linux sanitizer job covers the new executable.
 ## Local findings — 6 October 2026
 
 Qualification machine: AMD Ryzen 7 7730U, 8 cores/16 logical processors,
-Windows 10 Pro 10.0.19045, Balanced power scheme, GNU 15.2.0 Release (-O3).
+Windows 10 Pro 10.0.19045, Balanced power scheme, GNU 14.2.0 Release (-O3).
 All operating measurements completed; callback/decomposition passes ran
 separately from the parallel candidate measurement workers. Static instrumented
 trials show appreciable OS/frequency variability; they are not interchangeable
