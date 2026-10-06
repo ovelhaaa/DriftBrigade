@@ -98,3 +98,7 @@ The 1024-stage, block-128 normal/heavy CPU factors are .2121/.2112 at 44.1, .316
 ## Remaining product decisions
 
 User-facing backend mode, plugin parameters/state, live switching/migration/crossfade, final stage count/headroom/gain/capacitor/feedback topology, feedback limiter, coupled continuous BBDTerminals solver, clock feedthrough/whine, IC/pedal calibration, UI/presets and subjective Digital/BBD or M1.1 variant/bank winner remain deferred. Next milestone should refine the measured operating envelope and startup/feedback behavior on target hardware before proposing any user-facing mode. Numerical finite fixtures and headroom occupancy do not establish an unrestricted circuit model or product-ready sound.
+
+## M2.7.1 — instrumentation reset correction
+
+Operating instrumentation enable state is configuration owned solely by `ClockedBBDCore::collectOperatingStats`. Instrumented voices default to enabled at construction; the explicit caller selection survives voice/engine reset. Reset clears guard counters, operating statistics and residence timestamps without changing collection state. Regression tests cover all eight voices, OFF → reset, ON → reset, repeated OFF/ON/OFF resets, standalone voice reset, allocation-free replay and ON/OFF audio bit identity. The existing CPU benchmark checks disabled collection after its timed section; its methodology and CSV schema are unchanged. No DSP/audio behavior changed.

@@ -303,7 +303,87 @@ void invariance(std::ostream *report = nullptr) {
       }
     }
 }
+// Collection is configuration; counters and timestamps are resettable data.
+void checkInstrumentation(const BBDModulatedDelayVoice &voice, bool enabled,
+                          bool measured) {
+  const auto &core = voice.signalPath().core;
+  const auto &stats = core.operatingStats;
+  require(core.collectOperatingStats == enabled,
+          "instrumentation selection survives reset");
+  require(voice.hiddenClamps == 0 && voice.numericalGuards == 0,
+          "instrumentation guard counters cleared/valid");
+  if (measured) {
+    require(stats.count > 0 && stats.transportedCount > 0 &&
+                stats.sumSquares > 0,
+            "enabled collection accumulates capture/residence data");
+  } else {
+    require(
+        stats.count == 0 && stats.nominalCount == 0 && stats.usefulCount == 0 &&
+            stats.transportedCount == 0 && stats.peak == 0 &&
+            stats.sumSquares == 0 && stats.sumMagnitude == 0 &&
+            stats.aboveNominalSeconds == 0 && stats.nonlinearInputPeak == 0 &&
+            stats.nonlinearOutputPeak == 0 && stats.lastInput == 0 &&
+            stats.lastNonlinearInput == 0 && stats.lastNonlinearOutput == 0 &&
+            stats.maximumBucketResidence == 0 &&
+            stats.minimumBucketResidence == std::numeric_limits<double>::max(),
+        "reset/disabled collection has empty operating statistics");
+    for (auto bin : stats.bins)
+      require(bin == 0, "empty distribution bins");
+    for (double time : core.captureTimes)
+      require(time == -1, "empty residence timestamps");
+  }
+}
+void instrumentationLifecycle() {
+  constexpr int length = 2048;
+  DriftEngine e;
+  EngineParameters p;
+  configure(e, DelayBackend::ExperimentalBBD, p, 48000);
+  std::array<std::array<double, 2>, length> reference;
+  for (int n = 0; n < length; ++n)
+    reference[n] = e.processSample(signal(7, n, 48000), signal(4, n, 48000));
+  for (bool enabled : {false, true, false, false, true}) {
+    e.enableBBDOperatingInstrumentation(enabled);
+    const auto before = allocations.load();
+    e.reset(77);
+    for (int ch = 0; ch < 2; ++ch)
+      for (int b = 0; b < 4; ++b)
+        checkInstrumentation(e.bbdVoice(ch, b), enabled, false);
+    for (int n = 0; n < length; ++n) {
+      auto y = e.processSample(signal(7, n, 48000), signal(4, n, 48000));
+      require(std::memcmp(y.data(), reference[n].data(), sizeof(y)) == 0,
+              "ON/OFF reset replay audio bit identity");
+    }
+    for (int ch = 0; ch < 2; ++ch)
+      for (int b = 0; b < 4; ++b)
+        checkInstrumentation(e.bbdVoice(ch, b), enabled, enabled);
+    require(before == allocations.load(),
+            "instrumentation reset/render allocations");
+  }
+  BBDModulatedDelayVoice voice;
+  auto config = BBDVoiceConfig::fullResearchFixture();
+  voice.prepare(48000, config);
+  std::array<double, length> voiceReference;
+  for (int n = 0; n < length; ++n)
+    voiceReference[n] = voice.process(signal(7, n, 48000), .008, .25);
+  for (bool enabled : {false, true, false}) {
+    voice.enableOperatingInstrumentation(enabled);
+    voice.hiddenClamps = 7;
+    voice.numericalGuards = 9;
+    const auto before = allocations.load();
+    voice.reset(config.seed);
+    checkInstrumentation(voice, enabled, false);
+    for (int n = 0; n < length; ++n) {
+      const auto y = voice.process(signal(7, n, 48000), .008, .25);
+      require(std::memcmp(&y, &voiceReference[n], sizeof(y)) == 0,
+              "standalone voice ON/OFF reset audio identity");
+    }
+    checkInstrumentation(voice, enabled, enabled);
+    require(before == allocations.load(),
+            "voice instrumentation reset/render allocations");
+  }
+}
 void tests() {
+  instrumentationLifecycle();
   regression();
   invariance();
   {
@@ -666,6 +746,10 @@ void benchmark(const std::filesystem::path &root) {
               clockMax = t.maximumBBDClock;
               clockSum = t.accumulatedBBDClock * total / (total + 1024);
             }
+            if (backend == DelayBackend::ExperimentalBBD)
+              for (int ch = 0; ch < 2; ++ch)
+                for (int b = 0; b < 4; ++b)
+                  checkInstrumentation(e.bbdVoice(ch, b), false, false);
             double factor = seconds / (total / sr);
             if (backend == DelayBackend::DigitalFractional)
               digitalTime = factor;
