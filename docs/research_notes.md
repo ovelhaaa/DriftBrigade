@@ -122,3 +122,26 @@ defaults. Noise-off/nonlinearity-off comparisons are labelled measurement
 fixtures. Minimum-delay high-rate deadline failures prevent an unrestricted BBD
 realtime claim. DigitalFractional remains production/default. See
 [M2.8 report](m2_8_bbd_realtime_hardening.md) for provenance and limits.
+
+# M2.9 product-envelope qualification
+
+M2.8 is QUALIFIED PREVIOUS MILESTONE evidence for model robustness, including
+uncomfortable maximum-clock realtime corners. M2.8.1 fixes immediate hostile
+state-recovery reporting (0 frames) without changing detector recovery or DSP.
+M2.9 investigates 512/1024/2048/4096 stages with event ceilings below the
+128-edge MODEL CAPABILITY. Repeated CPU, response/noise/distortion, onset
+headroom, parameter coverage and feedback/DC evidence stay separately visible.
+Only the qualification harness contains the experimental feedback blocker.
+ENGINEERING PRODUCT ENVELOPE and PRODUCTIZATION CANDIDATE labels do not imply
+FINAL SHIPPING DEFAULT. All prior CI jobs/artifacts remain; new hosted timing
+is informational. See [M2.9 report](m2_9_bbd_product_envelope.md).
+
+M2.9 local recommendation (6 October 2026): first listen to Balanced/1024,
+Nominal, 44.1/48/88.2 kHz, clock <= min(384 kHz, 8*hostRate), with the 1.451/
+1.333 ms floors and block64 qualification reference. Five production modulation
+runs at 48 kHz/block64 had median/worst p99 .363/.389 ms and zero misses.
+96 kHz remains experimental because the additional repeated block128 cohort
+showed unresolved tails; do not discard that cohort to advertise support.
+Only 41.67% of the existing short-center-heavy grid is fully preserved, so
+explicit future range/depth admission remains a blocker. Nominal onset peak
+and loop/output DC evidence support further listening, not public readiness.

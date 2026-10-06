@@ -145,3 +145,18 @@ jobs:
         with:
           name: DriftBrigade-M2.8-BBD-Realtime-Hardening
           path: artifact/
+  bbd-product-envelope-qualification:
+    needs: [dsp, sanitize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target drift_bbd_product_envelope_qualification --parallel 2
+      - run: ./build/drift_bbd_product_envelope_qualification --tests-only
+      - run: ./build/drift_bbd_product_envelope_qualification artifact --ci
+      - run: python3 tools/summarize_bbd_product_envelope.py artifact
+      - run: cp docs/m2_9_bbd_product_envelope.md artifact/QUALIFICATION.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M2.9-BBD-Product-Envelope
+          path: artifact/
