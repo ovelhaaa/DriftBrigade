@@ -99,3 +99,11 @@ qualification reference. This policy exists only in reports; the engine still
 uses its model limit, and the public plugin still routes DigitalFractional.
 Future prepare-time range/stage/fallback behavior, tiny-block policy and final
 feedback topology require product decisions before public BBD admission.
+
+M3.0 is an offline, deterministic, blind listening bake-off of independent
+backend/stage/gain/modulation/bank choices within that candidate envelope.
+It uses the real DriftEngine and full BBD fixture, verifies common trajectories,
+and supplies RAW and constant-gain matched PCM24 audio for human decisions.
+BBD remains internal; DigitalFractional remains the plugin/default backend.
+See [M3.0 bake-off](m3_0_bbd_listening_bakeoff.md) and
+[listening guide](m3_0_listening_guide.md).

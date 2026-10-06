@@ -160,3 +160,21 @@ jobs:
         with:
           name: DriftBrigade-M2.9-BBD-Product-Envelope
           path: artifact/
+  bbd-listening-bakeoff:
+    needs: [dsp, sanitize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target drift_bbd_listening_bakeoff --parallel 2
+      - run: ctest --test-dir build -R bbd_listening_ --output-on-failure
+      - run: ./build/drift_bbd_listening_bakeoff artifact
+      - run: ./build/drift_bbd_listening_bakeoff determinism-repeat
+      - run: cp docs/m3_0_listening_guide.md artifact/LISTENING_GUIDE.md
+      - run: cp docs/m3_0_bbd_listening_bakeoff.md artifact/TECHNICAL_NOTES.md
+      - run: python3 tools/verify_bbd_listening_bakeoff.py artifact --compare determinism-repeat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M3.0-BBD-Listening-Bakeoff
+          path: artifact/
+          if-no-files-found: error
