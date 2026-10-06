@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-namespace drift {
+namespace frozenM25 {
 void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     if(stages<2 || stages>65536 || stages%2) throw std::invalid_argument("BBD physical stages must be even, in [2,65536]");
     trace.hostRateWasNormalized=!std::isfinite(hostSampleRate) || hostSampleRate<minimumHostSampleRate || hostSampleRate>maximumHostSampleRate;
@@ -80,22 +80,17 @@ double ClockedBBDCore::process(double input) noexcept {
         const double time=static_cast<double>(hostSamples)*dt+instant;
         if(capturePhase) {
             if(mode==BBDMode::AsyncLinearReference) {
-                if(captured) { inputFilter.advanceWithTransition(inputPeriod); DRIFT_ASYNC_COUNT(periodApplications,1); }
+                if(captured) { inputFilter.advanceWithTransition(inputPeriod); FROZEN_M25_ASYNC_COUNT(periodApplications,1); }
                 else inputFilter.advance(instant);
                 captured=true; inputElapsed=instant;
             }
-            double captureInput=mode==BBDMode::TransportOnly?input:inputFilter.value();
-            if(domainInputGain!=1) captureInput*=domainInputGain;
-            storage[head]=character.capture(captureInput);
+            storage[head]=character.capture(mode==BBDMode::TransportOnly?input:inputFilter.value());
 #ifdef DRIFT_BBD_INSTRUMENT
             if(collectOperatingStats) {
                 const double x=storage[head],m=std::abs(x);
                 ++operatingStats.count;
-                operatingStats.nominalCount+=m<=nonlinearReference;
-                const double normalized=m/nonlinearReference;
-                ++operatingStats.bins[normalized<.01?0:normalized<.1?1:normalized<=1?2:normalized<=2?3:4];
-                if(normalized>1) operatingStats.aboveNominalSeconds+=1/trace.effectiveClockHz;
-                operatingStats.usefulCount+=m>=.1*nonlinearReference && m<=nonlinearReference;
+                operatingStats.nominalCount+=m<=1;
+                operatingStats.usefulCount+=m>=.1 && m<=1;
                 operatingStats.peak=std::max(operatingStats.peak,m);
                 operatingStats.sumSquares+=x*x; operatingStats.sumMagnitude+=m;
                 operatingStats.lastInput=x;
@@ -108,20 +103,15 @@ double ClockedBBDCore::process(double input) noexcept {
             // Eq.1: sample captured at t_n exits at t_(n+N-1).
             // The combined output holds this value for the next two edges.
             if(mode==BBDMode::AsyncLinearReference) {
-                if(outputUpdated) { outputFilter.advanceWithTransition(outputPeriod,held); DRIFT_ASYNC_COUNT(periodApplications,1); }
+                if(outputUpdated) { outputFilter.advanceWithTransition(outputPeriod,held); FROZEN_M25_ASYNC_COUNT(periodApplications,1); }
                 else outputFilter.advance(instant,held);
                 outputUpdated=true; outputElapsed=instant;
             }
-            held=nonlinearReference==1 || !character.nonlinear.enabled()
-                ?character.transfer(storage[head])
-                :character.transferAfterNonlinear(character.nonlinear.process(storage[head]/nonlinearReference)*nonlinearReference);
+            held=character.transfer(storage[head]);
 #ifdef DRIFT_BBD_INSTRUMENT
             if(collectOperatingStats) {
                 operatingStats.lastNonlinearInput=storage[head];
-                operatingStats.lastNonlinearOutput=nonlinearReference==1?character.nonlinear.process(storage[head])
-                    :character.nonlinear.process(storage[head]/nonlinearReference)*nonlinearReference;
-                operatingStats.nonlinearInputPeak=std::max(operatingStats.nonlinearInputPeak,std::abs(storage[head]));
-                operatingStats.nonlinearOutputPeak=std::max(operatingStats.nonlinearOutputPeak,std::abs(operatingStats.lastNonlinearOutput));
+                operatingStats.lastNonlinearOutput=character.nonlinear.process(storage[head]);
             }
 #endif
             ++trace.totalOutputCount; ++trace.outputsThisHostSample;
@@ -137,8 +127,7 @@ double ClockedBBDCore::process(double input) noexcept {
     }
     ++hostSamples; trace.totalEventCount+=events;
     trace.accumulatedClockPhase=eventPhase; trace.nextEdgeCaptures=capturePhase;
-    return mode==BBDMode::TransportOnly?(domainOutputGain==1?held:held*domainOutputGain)
-        :(domainOutputGain==1?outputFilter.value():outputFilter.value()*domainOutputGain);
+    return mode==BBDMode::TransportOnly?held:outputFilter.value();
 }
 double ClockedBBDCore::stageValue(std::size_t logicalStage) const noexcept {
     if(logicalStage>=storage.size()) return 0.0;

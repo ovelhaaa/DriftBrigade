@@ -1,12 +1,11 @@
 #pragma once
 #include "DspMath.h"
-#include "BBDGainStaging.h"
 #include "AsyncAnalogFilter.h"
 #include "BBDDeviceCharacter.h"
 #include <cstdint>
 #include <limits>
 #include <vector>
-namespace drift {
+namespace frozenM25 {
 enum class BBDMode { TransportOnly, AsyncLinearReference };
 enum class BBDFilterProfile { ValidationPrototype, HoltersParkerTable1 };
 struct BBDTelemetry {
@@ -32,10 +31,6 @@ public:
     void setQualificationMode(BBDMode mode,BBDFilterProfile profile=BBDFilterProfile::ValidationPrototype) noexcept;
     // Internal qualification configuration: set before prepare.
     void setCharacterConfig(BBDCharacterConfig config) noexcept { character.configure(config); }
-    void setOperatingDomain(double inputGain=1, double outputGain=1, double reference=1) noexcept {
-        BBDGainStagingConfig c; c.compressorToBBDGain=inputGain; c.bbdToExpanderGain=outputGain; c.nonlinearReferenceLevel=reference;
-        c=BBDGainStagingConfig::validated(c); domainInputGain=c.compressorToBBDGain; domainOutputGain=c.bbdToExpanderGain; nonlinearReference=c.nonlinearReferenceLevel;
-    }
     const BBDDeviceCharacter& deviceCharacter() const noexcept { return character; }
     double process(double input) noexcept;
     const BBDTelemetry& telemetry() const noexcept { return trace; }
@@ -47,8 +42,6 @@ public:
 #ifdef DRIFT_BBD_INSTRUMENT
     struct InputOperatingStats {
         std::uint64_t count=0, nominalCount=0, usefulCount=0;
-        std::uint64_t bins[5]={};
-        double aboveNominalSeconds=0, nonlinearInputPeak=0, nonlinearOutputPeak=0;
         double peak=0, sumSquares=0, sumMagnitude=0, lastInput=0, lastNonlinearInput=0, lastNonlinearOutput=0;
     };
     InputOperatingStats operatingStats;
@@ -66,7 +59,6 @@ private:
     AsyncAnalogFilter inputFilter,outputFilter;
     AsyncAnalogTransition inputHost,outputHost,inputPeriod,outputPeriod;
     double cachedClock=-1;
-    double domainInputGain=1,domainOutputGain=1,nonlinearReference=1;
     void rebuildTransitions() noexcept;
     BBDDeviceCharacter character;
     BBDTelemetry trace;

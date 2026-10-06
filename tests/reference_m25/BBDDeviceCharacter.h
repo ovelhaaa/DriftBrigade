@@ -6,7 +6,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-namespace drift {
+namespace frozenM25 {
 enum class BBDCharacterMode { Ideal, LossOnly, NoiseOnly, FullLinearCharacter };
 struct BBDCharacterConfig {
   BBDCharacterMode mode = BBDCharacterMode::Ideal;
@@ -39,8 +39,8 @@ private:
 class BBDDeviceLoss {
 public:
   void prepare(const BBDCharacterConfig &c, std::size_t stages) noexcept {
-    DRIFT_ASYNC_COUNT(characterPow,c.insertionDb!=0 ? 1 : 0);
-    DRIFT_ASYNC_COUNT(characterExp,(c.lossPerStage!=0 ? 1 : 0)+(c.residualPolePer1024!=0 ? 1 : 0));
+    FROZEN_M25_ASYNC_COUNT(characterPow,c.insertionDb!=0 ? 1 : 0);
+    FROZEN_M25_ASYNC_COUNT(characterExp,(c.lossPerStage!=0 ? 1 : 0)+(c.residualPolePer1024!=0 ? 1 : 0));
     constantGain = (c.insertionDb == 0 ? 1 : std::pow(10., c.insertionDb / 20)) *
                    (c.lossPerStage == 0 ? 1 : std::exp(-static_cast<double>(stages)*c.lossPerStage));
     leakage = static_cast<double>(stages)*c.leakagePerStageSecond;
@@ -48,7 +48,7 @@ public:
     gain=constantGain;
   }
   void update(double clock) noexcept {
-    DRIFT_ASYNC_COUNT(characterExp,leakage!=0 ? 1 : 0);
+    FROZEN_M25_ASYNC_COUNT(characterExp,leakage!=0 ? 1 : 0);
     gain=leakage==0 ? constantGain : constantGain*std::exp(-leakage/(2*clock));
   }
   // Standalone measurement API; realtime character uses prepare + update(clock).
@@ -130,9 +130,6 @@ public:
     if (nonlinear.enabled()) {
       x = nonlinear.process(x);
     }
-    return transferAfterNonlinear(x);
-  }
-  double transferAfterNonlinear(double x) noexcept {
     if (lossEnabled())
       x = loss.process(x);
     if (config.mode == BBDCharacterMode::FullLinearCharacter)

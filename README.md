@@ -63,3 +63,11 @@ build-dsp/drift_bbd_character_qualification output/DriftBrigade-M2.2-BBD-Charact
 ```
 
 On Windows append `.exe`. The generator checks response decomposition, broad-band noise spectra and bounded feedback, and checks every artifact stream's finalization. CI uploads `DriftBrigade-M2.2-BBD-Character-Qualification` independently of the preserved M2.1 artifact.
+
+## M2.6 internal BBD headroom qualification
+
+Production still uses DigitalFractionalDelay. See
+[operating-domain and headroom report](docs/m2_6_bbd_gain_headroom.md).
+Build `drift_bbd_headroom_qualification`, run `--tests-only` for numerical checks,
+or pass an output directory for the complete CSV artifact.
+CI artifact: `DriftBrigade-M2.6-BBD-Headroom-Qualification`.

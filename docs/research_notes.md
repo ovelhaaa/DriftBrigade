@@ -68,3 +68,39 @@ All five supplied PDFs were inspected before DSP implementation. Page numbers be
 - **FIT FROM PAPER DATA:** none in M2.4. Published illustrative coefficients are not a new fit; no calibrated voltage mapping, source-point residual error or measured DC offset is available.
 - **ENGINEERING APPROXIMATION:** zero-offset cubic variant,zero-default strength,aggregate transfer at BBD output updates before loss/noise/hold,C1 rational bounded overload continuation; neutral stage/clock dependence. No per-stage equivalence is claimed. Input voltage normalization,DC behavior and overload policy are engineering choices. Insertion gain is separate,not hidden in coefficients.
 - Detailed evidence,printed-equation discrepancy,alias measurements,feedback limitations and qualification method: `m2_4_bbd_nonlinearity.md`. Production remains DigitalFractionalDelay; companding is deferred to M2.5.
+
+## M2.6 operating-level source review (before profile qualification)
+
+Re-read the supplied papers, with focused extraction of Raffel/Smith PDF pp.4-7
+and Holters/Parker PDF pp.1-6. The three modulation/perception papers supply no
+BBD terminal operating-point or supply-voltage calibration.
+
+- **PAPER-BACKED:** Raffel/Smith p.4 sections 3.1-3.2: low distortion requires
+  input to remain a small fraction of supply; near-maximum inputs typically give
+  approximately 60 dB SNR. Companding brings the signal near that maximum.
+  Neither the fraction, supply nor maximum volts is specified. Insertion gain is
+  typically 0-2 dB, variable with device/clock/stages. These are broad observations,
+  not a threshold for this normalized model or a guaranteed dynamic range.
+- **PAPER-BACKED:** p.4 sections 3.3-3.4: 2:1 compressor/expander, 10 kohm,
+  0.22-1 uF. Both outside-filter and terminal placements and different feedback
+  placements are reported, without a universal feedback gain or terminal timebase.
+- **PAPER-BACKED:** pp.5-6: approximate stage-dependent THD, and distortion figures
+  taken after reconstruction at different amplitudes. Figures 9-12 use relative
+  amplitude/normalized axes, without physical voltage, supply, bias, exact source
+  amplitude or measured IC operating point sufficient to calibrate x=1.
+- **DEVICE-SPECIFIC / NOT GENERALIZED:** Holters/Parker p.6 measured Juno-60 BBD
+  insertion gain approximately +2.3 dB, minimum clock about 26 kHz; not a universal
+  gain, headroom or terminal voltage. Table 1 filter residues/poles describe the
+  example linear response, not a general unit-gain assumption.
+- **DERIVED FROM PAPER DATA:** inverse gains g and 1/g across an ideal linear
+  transport cancel; when used before/after the filters, scalar gain commutes with
+  linear filtering. The separate detectors recover their original units only if
+  gain is inverted BEFORE expansion. Pre-compressor scaling a requires an external
+  inverse a, not simply 1/sqrt(a), for steady ideal roundtrip.
+- **ENGINEERING NORMALIZATION:** x=1 is the existing nominal nonlinear boundary;
+  |x|=2 is an overload reporting boundary, not promised physical headroom. Useful
+  band 0.1-1 is a reporting convention. Profile terminal gains 1, 1/8, 1/4, 1/2
+  explore fixed attenuation and its reciprocal; no voltage mapping or new default.
+  Detector startup unity, .47 uF fixture, fixed existing noise RMS, SNR-scaled
+  noise experiments and candidate SNR/THD/occupancy thresholds remain engineering.
+  No clipping, limiter or coefficient retuning is introduced.

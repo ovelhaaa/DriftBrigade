@@ -104,3 +104,16 @@ jobs:
         with:
           name: DriftBrigade-M2.5-BBD-Compander-Qualification
           path: artifact/
+
+  bbd-headroom-qualification:
+    needs: [dsp, sanitize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target drift_bbd_headroom_qualification --parallel 2
+      - run: ./build/drift_bbd_headroom_qualification artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M2.6-BBD-Headroom-Qualification
+          path: artifact/
