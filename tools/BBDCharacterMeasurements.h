@@ -4,14 +4,9 @@ namespace characterQualification {
 inline drift::BBDCharacterConfig
 example(drift::BBDCharacterMode mode =
             drift::BBDCharacterMode::FullLinearCharacter) {
-  drift::BBDCharacterConfig c;
+  auto c = drift::BBDCharacterConfig::syntheticQualificationFixture();
   c.mode = mode;
   // Deliberately synthetic sensitivity fixture, never a device calibration.
-  c.lossPerStage = 1e-5;
-  c.leakagePerStageSecond = .1;
-  c.residualPolePer1024 = .25;
-  c.outputNoiseRms = 1e-4;
-  c.mismatchFraction = .001;
   return c;
 }
 inline void setup(drift::ClockedBBDCore &core, std::size_t stages, double clock,

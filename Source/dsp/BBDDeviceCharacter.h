@@ -15,6 +15,17 @@ struct BBDCharacterConfig {
          mismatchFraction = 0;
   std::uint32_t seed = 1;
   BBDNonlinearConfig nonlinear;
+  // M2.2 synthetic sensitivity fixture: engineering data, never IC calibration.
+  static BBDCharacterConfig syntheticQualificationFixture() noexcept {
+    BBDCharacterConfig c;
+    c.mode=BBDCharacterMode::FullLinearCharacter;
+    c.lossPerStage=1e-5;
+    c.leakagePerStageSecond=.1;
+    c.residualPolePer1024=.25;
+    c.outputNoiseRms=1e-4;
+    c.mismatchFraction=.001;
+    return c;
+  }
 };
 class BBDNoiseModel {
 public:

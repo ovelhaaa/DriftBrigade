@@ -15,11 +15,7 @@ struct BBDVoiceConfig {
   static BBDVoiceConfig fullResearchFixture() noexcept {
     BBDVoiceConfig c;
     c.compander.enabled = true;
-    c.character.mode = BBDCharacterMode::FullLinearCharacter;
-    c.character.inputNoiseRms = c.character.outputNoiseRms = 1e-4;
-    c.character.lossPerStage = 1e-5;
-    c.character.residualPolePer1024 = .4;
-    c.character.mismatchFraction = .01;
+    c.character = BBDCharacterConfig::syntheticQualificationFixture();
     c.character.nonlinear.strength = 1;
     c.character.nonlinear.mode = BBDNonlinearityMode::EngineeringPolynomial;
     c.gainStaging = BBDGainStagingConfig::profile(BBDHeadroomProfile::Nominal);

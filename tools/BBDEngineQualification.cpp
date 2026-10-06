@@ -500,14 +500,21 @@ void qualification(const std::filesystem::path &root) {
     auto f = file(
         root, "bbd_engine_stage_feasibility.csv",
         "rate,stages,min_delay_ms,max_core_delay_s,min_center_ms,"
-        "requested_events_at_min_center,status,unrestricted_request_status");
+        "requested_events_at_min_center,status,unrestricted_request_status,all_"
+        "centers_supported,pre_m27_conservative_trajectory_min_ms");
     for (double sr : rates)
       for (auto count : stages) {
         double min = double(count) / (sr * 128);
+        // Right modulation has three nonnegative coefficients whose squared
+        // sum is one. Cauchy-Schwarz bounds their sum by sqrt(3), tighter than
+        // the engine's deliberately conservative 2*source magnitude bound.
+        const double preMinimum =
+            .0003 - .85 * (.0003 - 4 / sr) * std::sqrt(3.) / 2;
         f << sr << ',' << count << ',' << min * 1000 << ',' << count / 2.
           << ",0.3," << count / (sr * .0003) << ','
-          << (min <= .0003 ? "FULL_RANGE" : "LIMITED_SHORT_DELAY") << ','
-          << (min <= .0003 ? "FULL_RANGE" : "EVENT_LIMIT_EXCEEDED") << '\n';
+          << (min <= preMinimum ? "FULL_RANGE" : "LIMITED_SHORT_DELAY") << ','
+          << (min <= preMinimum ? "FULL_RANGE" : "EVENT_LIMIT_EXCEEDED") << ','
+          << (min <= .0003) << ',' << preMinimum * 1000 << '\n';
       }
   }
   {
@@ -515,7 +522,8 @@ void qualification(const std::filesystem::path &root) {
                   "rate,stages,motion,depth,center_ms,requested_excursion_s,"
                   "limited_excursion_s,actual_min_s,actual_max_s,hidden_clamps,"
                   "clock_min,clock_max,max_events,events_per_second,limited_"
-                  "sample_percent,observation_samples");
+                  "sample_percent,observation_samples,pre_m27_excursion_s,"
+                  "extra_excursion_reduction_s");
     for (double sr : rates)
       for (auto count : stages)
         for (double motion : {.05, .2, .7, 2., 6., 10.})
@@ -529,6 +537,12 @@ void qualification(const std::filesystem::path &root) {
               configure(e, DelayBackend::ExperimentalBBD, p, sr, count);
               auto o = render(e, sr, 10, 256);
               const auto &t = e.telemetry();
+              PreM27DriftEngine old;
+              old.setParameters(p);
+              old.prepare(sr, 77);
+              old.processSample(0, 0);
+              const double originalExcursion =
+                  old.telemetry().actualExcursionSeconds;
               f << sr << ',' << count << ',' << motion << ',' << depth << ','
                 << center << ',' << t.requestedExcursionSeconds << ','
                 << t.actualExcursionSeconds << ',' << o.delayMin << ','
@@ -536,6 +550,8 @@ void qualification(const std::filesystem::path &root) {
                 << o.clockMax << ',' << o.maxEvents << ','
                 << o.events / (o.host / sr) << ','
                 << 100. * t.physicalLimitSamples / o.host << ',' << o.host
+                << ',' << originalExcursion << ','
+                << std::max(0., originalExcursion - t.actualExcursionSeconds)
                 << '\n';
             }
   }
@@ -859,7 +875,8 @@ void qualification(const std::filesystem::path &root) {
         file(root, "README.txt", "DriftBrigade-M2.7-BBD-Engine-Qualification");
     f << "QUALIFICATION FIXTURE / ENGINEERING NORMALIZATION / NOT PRODUCT "
          "DEFAULT.\nTable1 filters; .47uF/10kohm; M2.4 polynomial strength 1; "
-         "M2.2 synthetic noise 1e-4, loss 1e-5/stage, pole .4, mismatch .01; "
+         "M2.2 synthetic output noise 1e-4 (input noise zero), loss "
+         "1e-5/stage, leakage .1/stage-second, pole .25, mismatch .001; "
          "M2.6 Nominal gains .25/4. Default 1024 physical stages.\nZero hidden "
          "core clamps and numerical guards are hard gates. Digital default "
          "preserved, frozen M2.6 bit regression. Noise seed = hash(engine seed "

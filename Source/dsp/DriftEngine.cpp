@@ -82,7 +82,7 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
     trace.requestedExcursionSeconds = depthSeconds(p[Motion], p[Depth], perceptualDepth);
     trace.actualExcursionSeconds = std::min(trace.requestedExcursionSeconds, (center-minimumDelay)*0.85/bound);
     if (backend == DelayBackend::ExperimentalBBD) {
-        trace.actualExcursionSeconds = std::max(0.0,std::min(trace.actualExcursionSeconds,(maximumDelay-center)*.85/bound));
+        trace.actualExcursionSeconds = std::max(0.0,trace.actualExcursionSeconds);
 #ifdef DRIFT_BBD_INSTRUMENT
         trace.physicalLimitSamples += center != p[Center]*.001 || trace.actualExcursionSeconds < trace.requestedExcursionSeconds;
 #endif
