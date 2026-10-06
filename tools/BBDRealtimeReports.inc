@@ -430,11 +430,11 @@ void recoveryReports(const std::filesystem::path &root) {
         }
         auto c = counts(e);
         require(engineFinite(e), "hostile finite state report");
-        int recovery = 0, detectorRecovery = 0;
+        int recovery = recoveryObservation(-1, engineFinite(e), 0), detectorRecovery = 0;
+        require(recovery == 0, "finite hostile state reports immediate recovery");
         for (int n = 0; n < 20000; ++n) {
           e.processSample(material(3, n, 48000), material(2, n, 48000));
-          if (!recovery && engineFinite(e))
-            recovery = n + 1;
+          recovery = recoveryObservation(recovery, engineFinite(e), n + 1);
           if (!detectorRecovery) {
             bool recovered = true;
             for (int ch = 0; ch < 2; ++ch)
@@ -448,6 +448,7 @@ void recoveryReports(const std::filesystem::path &root) {
           }
         }
         const auto &path = e.bbdVoice(0, 0).signalPath();
+        require(recovery == 0, "immediate recovery remains zero after observation");
         double comp = path.compressor.levelAverager().value(),
                exp = path.expander.levelAverager().value();
         e.reset(seed);

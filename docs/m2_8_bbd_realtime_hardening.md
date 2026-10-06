@@ -338,3 +338,7 @@ All 14 CI jobs passed before this artifact-summary/pre-DC-baseline update
 PR; CPU misses are informational. No numerical blocker was observed in these
 fixtures. High-rate minimum-delay deadline failure and configuration-dependent
 startup amplification remain explicit barriers to unrestricted BBD readiness.
+
+### M2.8.1 reporting correction
+The hostile CSV recovery_frames field (state_recovery_frames conceptually) is 0 when state was already finite at the end of the hostile segment, positive for the first valid frame restoring finiteness, and -1 if unresolved. detector_recovery_frames independently measures return to the chosen detector operating region. This correction changes qualification reporting only; DSP is unchanged.
+

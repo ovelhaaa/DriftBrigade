@@ -19,6 +19,17 @@ void require(bool condition, const char *message) {
   if (!condition)
     throw std::runtime_error(message);
 }
+// Reporting sentinel: -1 unresolved, 0 finite at observation start, N valid frames.
+int recoveryObservation(int current, bool finite, int validFrames) {
+  return current < 0 && finite ? validFrames : current;
+}
+void recoveryReportingTests() {
+  require(recoveryObservation(-1, true, 0) == 0, "immediate recovery reporting");
+  require(recoveryObservation(0, true, 1) == 0, "immediate recovery preserved");
+  require(recoveryObservation(-1, false, 7) == -1, "unresolved recovery reporting");
+  require(recoveryObservation(-1, true, 7) == 7, "delayed recovery reporting");
+  require(recoveryObservation(7, true, 8) == 7, "first recovery preserved");
+}
 double noise(std::uint64_t n) {
   std::uint32_t v = std::uint32_t(n + 1);
   v ^= v >> 16;
@@ -926,6 +937,7 @@ void underflowTests() {
 }
 #include "BBDRealtimeReports.inc"
 void tests() {
+  recoveryReportingTests();
   nonfiniteTests();
   prepareTests();
   clockTests();
