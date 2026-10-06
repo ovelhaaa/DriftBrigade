@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-namespace drift {
+namespace drift_m24 {
 void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     if(stages<2 || stages>65536 || stages%2) throw std::invalid_argument("BBD physical stages must be even, in [2,65536]");
     trace.hostRateWasNormalized=!std::isfinite(hostSampleRate) || hostSampleRate<minimumHostSampleRate || hostSampleRate>maximumHostSampleRate;
@@ -32,9 +32,6 @@ void ClockedBBDCore::reset() noexcept {
     std::fill(storage.begin(),storage.end(),0.0);
     head=0; eventPhase=0.0; held=0.0; hostSamples=0; capturePhase=true;
     inputFilter.reset(); outputFilter.reset(); character.reset();
-#ifdef DRIFT_BBD_INSTRUMENT
-    operatingStats={};
-#endif
     trace.eventsThisHostSample=trace.capturesThisHostSample=trace.outputsThisHostSample=0;
     trace.totalEventCount=trace.totalCaptureCount=trace.totalOutputCount=0;
     trace.lastCaptureTimeSeconds=trace.lastOutputTimeSeconds=0.0;
@@ -80,22 +77,11 @@ double ClockedBBDCore::process(double input) noexcept {
         const double time=static_cast<double>(hostSamples)*dt+instant;
         if(capturePhase) {
             if(mode==BBDMode::AsyncLinearReference) {
-                if(captured) { inputFilter.advanceWithTransition(inputPeriod); DRIFT_ASYNC_COUNT(periodApplications,1); }
+                if(captured) { inputFilter.advanceWithTransition(inputPeriod); DRIFT_M24_ASYNC_COUNT(periodApplications,1); }
                 else inputFilter.advance(instant);
                 captured=true; inputElapsed=instant;
             }
             storage[head]=character.capture(mode==BBDMode::TransportOnly?input:inputFilter.value());
-#ifdef DRIFT_BBD_INSTRUMENT
-            if(collectOperatingStats) {
-                const double x=storage[head],m=std::abs(x);
-                ++operatingStats.count;
-                operatingStats.nominalCount+=m<=1;
-                operatingStats.usefulCount+=m>=.1 && m<=1;
-                operatingStats.peak=std::max(operatingStats.peak,m);
-                operatingStats.sumSquares+=x*x; operatingStats.sumMagnitude+=m;
-                operatingStats.lastInput=x;
-            }
-#endif
             if(++head==storage.size()) head=0;
             ++trace.totalCaptureCount; ++trace.capturesThisHostSample;
             trace.lastCaptureTimeSeconds=time;
@@ -103,17 +89,11 @@ double ClockedBBDCore::process(double input) noexcept {
             // Eq.1: sample captured at t_n exits at t_(n+N-1).
             // The combined output holds this value for the next two edges.
             if(mode==BBDMode::AsyncLinearReference) {
-                if(outputUpdated) { outputFilter.advanceWithTransition(outputPeriod,held); DRIFT_ASYNC_COUNT(periodApplications,1); }
+                if(outputUpdated) { outputFilter.advanceWithTransition(outputPeriod,held); DRIFT_M24_ASYNC_COUNT(periodApplications,1); }
                 else outputFilter.advance(instant,held);
                 outputUpdated=true; outputElapsed=instant;
             }
             held=character.transfer(storage[head]);
-#ifdef DRIFT_BBD_INSTRUMENT
-            if(collectOperatingStats) {
-                operatingStats.lastNonlinearInput=storage[head];
-                operatingStats.lastNonlinearOutput=character.nonlinear.process(storage[head]);
-            }
-#endif
             ++trace.totalOutputCount; ++trace.outputsThisHostSample;
             trace.lastOutputTimeSeconds=time;
         }

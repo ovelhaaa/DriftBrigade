@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
-namespace drift {
+namespace drift_m24 {
 enum class BBDMode { TransportOnly, AsyncLinearReference };
 enum class BBDFilterProfile { ValidationPrototype, HoltersParkerTable1 };
 struct BBDTelemetry {
@@ -40,12 +40,6 @@ public:
     double outputFilterValue() const noexcept { return outputFilter.value(); }
     bool finiteState() const noexcept;
 #ifdef DRIFT_BBD_INSTRUMENT
-    struct InputOperatingStats {
-        std::uint64_t count=0, nominalCount=0, usefulCount=0;
-        double peak=0, sumSquares=0, sumMagnitude=0, lastInput=0, lastNonlinearInput=0, lastNonlinearOutput=0;
-    };
-    InputOperatingStats operatingStats;
-    bool collectOperatingStats=false;
     auto inputFilterState() const noexcept { return inputFilter.stateSnapshot(); }
     auto outputFilterState() const noexcept { return outputFilter.stateSnapshot(); }
 #endif
