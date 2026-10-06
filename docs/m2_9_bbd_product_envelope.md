@@ -70,11 +70,11 @@ The coverage report reuses the existing M2.7 grid: Motion .05/.2/.7/2/6/10,
 Depth 0/.25/.5/.75/1 and Center .3/.5/1/2/5/10/20/30 ms (240 points), default Wander's conservative magnitude bound,
 and the existing perceptual mapping. Fractions are mutually exclusive: center
 below the product floor; additional excursion reduction relative to M2.8's
-already-admitted excursion; otherwise fully reproducible. This is a parameter
+already-admitted excursion under a proposed 15% excursion reserve above the new floor; otherwise fully reproducible. This reserve is an engineering admission policy, not a requirement of the clock ceiling. Separate `clock_cap_only_*` CSV columns omit that extra reserve. This is a parameter
 grid fraction, not a perceptual weighting or a probability of user settings.
 The CSV also provides effective maximum Depth in 0.001 steps at short centers.
-Default dynamics can reduce excursion further; it cannot break the conservative
-bound. Other M1.1 modulation variants require separate listening decisions.
+Width, coherence and dynamics change observed trajectories within the conservative
+bound; coverage describes the admitted excursion. Other M1.1 modulation variants require separate listening decisions.
 
 Current Center starts at 0.3 ms. All these candidate floors remove part of that
 range. Larger stage counts need proportionally higher clock for equal short
@@ -299,9 +299,9 @@ lower-event alternative and 2048/4096 as longer-delay character research options
 This remains a technical nomination, not a subjective sound winner.
 
 On the existing 240-point grid at 48 kHz, Economy/Balanced fully reproduce
-41.67%, require additional excursion reduction for 20.83%, and require center
-admission for 37.5%. Extended/LargeStageResearch fully reproduce 37.08/29.58%.
-For Balanced, Motion .7 and Center 8 ms imply effective maximum Depth .382;
+41.67% under the proposed 15% reserve, require additional excursion reduction for 20.83%, and require center
+admission for 37.5%. With only the physical clock cap, Economy/Balanced reproduce 48.33% and need excursion reduction for 14.17%; center admission remains 37.5%. Extended/LargeStageResearch fully reproduce 37.08/29.58%.
+For Balanced, Motion .7 and Center 8 ms imply effective maximum Depth .382 under that reserve; the already-admitted M2.8 excursion at Depth .5 fits the bare clock cap. Thus the additional reserve must be evaluated as a product policy, not presented as physical necessity;
 Center 2 ms leaves substantially less depth, and Center below 1.333 ms needs
 admission. The percentages are deliberately based on the actual older grid
 containing many short centers, rather than a new grid dominated by long delays.

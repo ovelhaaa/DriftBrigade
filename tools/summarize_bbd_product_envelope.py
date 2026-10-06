@@ -149,6 +149,9 @@ for r in quality:
         r[f"response_{frequency}_hz_db"] = gain["gain_db"]
     coverage = next(c for c in rows("bbd_product_parameter_coverage.csv") if c["candidate"] == r["candidate"] and c["sample_rate"] == r["sample_rate"])
     r["short_delay_grid_fully_reproducible_percent"] = coverage["fully_reproducible_percent"]
+    r["clock_cap_only_fully_reproducible_percent"] = coverage["clock_cap_only_fully_reproducible_percent"]
+    assert float(coverage["clock_cap_only_fully_reproducible_percent"]) >= float(coverage["fully_reproducible_percent"])
+    assert abs(sum(float(coverage[k]) for k in ("clock_cap_only_fully_reproducible_percent", "clock_cap_only_excursion_reduction_percent", "center_admission_percent")) - 100) < .001
 write("bbd_product_quality_cpu_frontier.csv", quality)
 
 combined_timing = [dict(r, measurement="static_floor_instrumented") for r in timing]

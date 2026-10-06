@@ -153,6 +153,7 @@ void productCoverage(std::ofstream &coverage, const BBDProductEnvelope &c,
   const double bound =
       DriftEngine::combinedModulationBound(OrganicVariant::Wander);
   int full = 0, reduced = 0, admitted = 0, total = 0;
+  int clockFull = 0, clockReduced = 0;
   for (double m : {.05, .2, .7, 2., 6., 10.})
     for (double depth : {0., .25, .5, .75, 1.})
       for (double d : {.3, .5, 1., 2., 5., 10., 20., 30.}) {
@@ -166,6 +167,12 @@ void productCoverage(std::ofstream &coverage, const BBDProductEnvelope &c,
           ++reduced;
         else
           ++full;
+        if (d * .001 >= c.floor(sr)) {
+          if (excursion > (d * .001 - c.floor(sr)) / bound)
+            ++clockReduced;
+          else
+            ++clockFull;
+        }
       }
   for (double m : {.05, .7, 4., 9.})
     for (double center : {1., 2., 4., 8., 16.}) {
@@ -178,7 +185,9 @@ void productCoverage(std::ofstream &coverage, const BBDProductEnvelope &c,
       coverage << c.name << ',' << sr << ',' << total << ','
                << 100. * full / total << ',' << 100. * reduced / total << ','
                << 100. * admitted / total << ',' << c.floor(sr) * 1000 << ','
-               << m << ',' << center << ',' << maxDepth << '\n';
+               << m << ',' << center << ',' << maxDepth << ','
+               << 100. * clockFull / total << ','
+               << 100. * clockReduced / total << ',' << .85 << '\n';
     }
   coverage.flush();
 }
@@ -213,7 +222,7 @@ void productReports(const std::filesystem::path &root, bool local) {
       root, "bbd_product_parameter_coverage.csv",
       "candidate,sample_rate,grid_points,fully_reproducible_percent,"
       "excursion_reduction_percent,center_admission_percent,minimum_"
-      "center_ms,motion,center_ms,max_effective_depth");
+      "center_ms,motion,center_ms,max_effective_depth,clock_cap_only_fully_reproducible_percent,clock_cap_only_excursion_reduction_percent,proposed_excursion_margin");
   auto support =
       productFile(root, "bbd_product_sample_rate_support.csv",
                   "candidate,sample_rate,classification,block64_worst_p99_"
@@ -348,7 +357,7 @@ int main(int argc, char **argv) {
               argv[1], "bbd_product_parameter_coverage.csv",
               "candidate,sample_rate,grid_points,fully_reproducible_percent,"
               "excursion_reduction_percent,center_admission_percent,minimum_"
-              "center_ms,motion,center_ms,max_effective_depth");
+              "center_ms,motion,center_ms,max_effective_depth,clock_cap_only_fully_reproducible_percent,clock_cap_only_excursion_reduction_percent,proposed_excursion_margin");
           for (auto c : candidates)
             for (double sr : rates)
               productCoverage(f, c, sr);
