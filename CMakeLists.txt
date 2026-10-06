@@ -144,3 +144,23 @@ add_test(NAME bbd_headroom_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
   -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-headroom-stream-tests
   -DBLOCKED_ARTIFACT=bbd_gain_profiles.csv
   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+
+# M2.7 actual eight-voice engine, separate measurement-only DSP build.
+add_executable(drift_bbd_engine_qualification tools/BBDEngineQualification.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp
+  tests/reference_m26/DriftEngine.cpp)
+target_include_directories(drift_bbd_engine_qualification PRIVATE Source)
+target_compile_definitions(drift_bbd_engine_qualification PRIVATE DRIFT_BBD_INSTRUMENT=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_engine_qualification PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_engine_qualification PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_engine_qualification PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_engine_numerical COMMAND drift_bbd_engine_qualification --tests-only)
+add_test(NAME bbd_engine_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_engine_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-engine-stream-tests
+  -DBLOCKED_ARTIFACT=bbd_engine_backend_regression.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)

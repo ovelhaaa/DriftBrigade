@@ -112,6 +112,12 @@ public:
     mismatch.prepare(config.mismatchFraction, config.seed ^ 0x85ebca6bu);
     reset();
   }
+  void reseed(std::uint32_t seed) noexcept {
+    config.seed = seed;
+    inputNoise.prepare(seed);
+    outputNoise.prepare(seed ^ 0x9e3779b9u);
+    mismatch.prepare(config.mismatchFraction, seed ^ 0x85ebca6bu);
+  }
   void reset() noexcept {
     loss.reset();
     inputNoise.reset();

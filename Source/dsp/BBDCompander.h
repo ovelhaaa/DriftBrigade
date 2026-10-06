@@ -131,7 +131,7 @@ private:
 
 // Runs outside both continuous/asynchronous filters at the host observation
 // rate. The BBD core and every event-time character operation remain untouched.
-class BBDCompanderQualificationChain {
+class BBDFullPath {
 public:
   void configure(BBDCompanderConfig c) noexcept {
     enabled = c.enabled;
@@ -173,4 +173,5 @@ private:
   bool enabled = false;
   double dt = 1.0 / 48000;
 };
+using BBDCompanderQualificationChain = BBDFullPath; // compatibility for existing qualification tools
 } // namespace drift

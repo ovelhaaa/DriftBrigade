@@ -25,6 +25,7 @@ public:
     static constexpr double minimumHostSampleRate=8000.0,maximumHostSampleRate=384000.0;
     void prepare(double hostSampleRate,std::size_t stages);
     void reset() noexcept;
+    void reseedCharacter(std::uint32_t seed) noexcept { character.reseed(seed); }
     void setDelaySeconds(double seconds) noexcept;
     // Qualification only: configure before prepare/reset. Clock transition/cache
     // rebuilds preserve bucket memory, scheduler phase, filter state, held output,
