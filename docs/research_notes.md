@@ -135,3 +135,13 @@ Only the qualification harness contains the experimental feedback blocker.
 ENGINEERING PRODUCT ENVELOPE and PRODUCTIZATION CANDIDATE labels do not imply
 FINAL SHIPPING DEFAULT. All prior CI jobs/artifacts remain; new hosted timing
 is informational. See [M2.9 report](m2_9_bbd_product_envelope.md).
+
+M2.9 local recommendation (6 October 2026): first listen to Balanced/1024,
+Nominal, 44.1/48/88.2 kHz, clock <= min(384 kHz, 8*hostRate), with the 1.451/
+1.333 ms floors and block64 qualification reference. Five production modulation
+runs at 48 kHz/block64 had median/worst p99 .363/.389 ms and zero misses.
+96 kHz remains experimental because the additional repeated block128 cohort
+showed unresolved tails; do not discard that cohort to advertise support.
+Only 41.67% of the existing short-center-heavy grid is fully preserved, so
+explicit future range/depth admission remains a blocker. Nominal onset peak
+and loop/output DC evidence support further listening, not public readiness.

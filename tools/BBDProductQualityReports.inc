@@ -315,7 +315,7 @@ void productCosts(const std::filesystem::path &root, bool local) {
   for (auto c : candidates)
     for (double sr : {48000., 96000.}) {
       auto full =
-          productTiming(sr, c.stages, c.floor(sr), 128, local ? 10000 : 128);
+          productTiming(sr, c.stages, c.floor(sr), 128, local ? 2048 : 128);
       double previous = 0;
       for (int layer = 0; layer < 5; ++layer) {
         std::array<BBDFullPath, 8> paths;
@@ -337,7 +337,7 @@ void productCosts(const std::filesystem::path &root, bool local) {
           path.setDelaySeconds(c.floor(sr));
           path.core.collectOperatingStats = false;
         }
-        std::vector<double> times(local ? 10000 : 128);
+        std::vector<double> times(local ? 2048 : 128);
         double sink = 0;
         auto before = allocations.load();
         for (std::size_t callback = 0; callback < times.size(); ++callback) {

@@ -92,3 +92,10 @@ checks variable-clock cost without measurement statistics. No admission policy
 is installed in the engine; core limits, digital routing, state and public
 parameters are unchanged. A PRODUCTIZATION CANDIDATE is NOT FINAL SHIPPING
 DEFAULT. See [M2.9 methodology and findings](m2_9_bbd_product_envelope.md).
+
+The measured M2.9 listening nomination is 1024/Nominal at 44.1/48/88.2 kHz,
+clock <= min(384 kHz,8*hostRate), with explicit delay floors and a block64
+qualification reference. This policy exists only in reports; the engine still
+uses its model limit, and the public plugin still routes DigitalFractional.
+Future prepare-time range/stage/fallback behavior, tiny-block policy and final
+feedback topology require product decisions before public BBD admission.
