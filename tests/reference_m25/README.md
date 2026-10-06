@@ -1,0 +1,1 @@
+Frozen merged M2.5 oracle, commit 5361be512570eb6340c2d67841bee02eda5252d2. Namespace and instrumentation macro relocation only; do not update with implementation. Every copied source was compared against that commit.

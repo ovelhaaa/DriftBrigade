@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace drift {
+namespace frozenM25 {
 // Internal qualification only. No production routing or topology selection.
 enum class BBDCompanderTopology { OutsideFilters };
 struct BBDCompanderConfig {
@@ -138,11 +138,6 @@ public:
     compressor.configure(c);
     expander.configure(c);
   }
-  void setGainStaging(BBDGainStagingConfig c) noexcept {
-    gains=BBDGainStagingConfig::validated(c);
-    core.setOperatingDomain(gains.compressorToBBDGain,gains.bbdToExpanderGain,gains.nonlinearReferenceLevel);
-  }
-  const BBDGainStagingConfig& gainStaging() const noexcept { return gains; }
   void prepare(double rate, std::size_t stages) {
     core.prepare(rate, stages);
     const double effective =
@@ -160,16 +155,15 @@ public:
     core.setDelaySeconds(seconds);
   }
   double process(double input) noexcept {
-    if(gains.preCompressorGain!=1) input*=gains.preCompressorGain;
-    double output=enabled?expander.process(core.process(compressor.process(input, dt)), dt):core.process(input);
-    return gains.postExpanderGain==1?output:output*gains.postExpanderGain;
+    if (!enabled)
+      return core.process(input); // exact M2.4 bypass
+    return expander.process(core.process(compressor.process(input, dt)), dt);
   }
   ClockedBBDCore core;
   BBDFeedbackCompressor compressor;
   BBDFeedforwardExpander expander;
 
 private:
-  BBDGainStagingConfig gains;
   bool enabled = false;
   double dt = 1.0 / 48000;
 };
