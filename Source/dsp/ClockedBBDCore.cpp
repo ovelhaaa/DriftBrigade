@@ -8,6 +8,9 @@ void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
     trace.hostRateWasNormalized=!std::isfinite(hostSampleRate) || hostSampleRate<minimumHostSampleRate || hostSampleRate>maximumHostSampleRate;
     sampleRate=trace.hostRateWasNormalized?48000.0:hostSampleRate;
     storage.assign(stages/2,0.0);
+#ifdef DRIFT_BBD_INSTRUMENT
+    captureTimes.assign(storage.size(),-1.0);
+#endif
     trace.stageCount=stages; trace.logicalSignalBuckets=storage.size();
     character.prepare(stages);
     cachedClock=-1; rebuildTransitions();
@@ -34,6 +37,7 @@ void ClockedBBDCore::reset() noexcept {
     inputFilter.reset(); outputFilter.reset(); character.reset();
 #ifdef DRIFT_BBD_INSTRUMENT
     operatingStats={};
+    std::fill(captureTimes.begin(),captureTimes.end(),-1.0);
 #endif
     trace.eventsThisHostSample=trace.capturesThisHostSample=trace.outputsThisHostSample=0;
     trace.totalEventCount=trace.totalCaptureCount=trace.totalOutputCount=0;
@@ -89,6 +93,7 @@ double ClockedBBDCore::process(double input) noexcept {
             storage[head]=character.capture(captureInput);
 #ifdef DRIFT_BBD_INSTRUMENT
             if(collectOperatingStats) {
+                captureTimes[head]=time;
                 const double x=storage[head],m=std::abs(x);
                 ++operatingStats.count;
                 operatingStats.nominalCount+=m<=nonlinearReference;
@@ -118,6 +123,12 @@ double ClockedBBDCore::process(double input) noexcept {
 #ifdef DRIFT_BBD_INSTRUMENT
             if(collectOperatingStats) {
                 operatingStats.lastNonlinearInput=storage[head];
+                if(captureTimes[head]>=0) {
+                    const double residence=time-captureTimes[head];
+                    ++operatingStats.transportedCount;
+                    operatingStats.minimumBucketResidence=std::min(operatingStats.minimumBucketResidence,residence);
+                    operatingStats.maximumBucketResidence=std::max(operatingStats.maximumBucketResidence,residence);
+                }
                 operatingStats.lastNonlinearOutput=nonlinearReference==1?character.nonlinear.process(storage[head])
                     :character.nonlinear.process(storage[head]/nonlinearReference)*nonlinearReference;
                 operatingStats.nonlinearInputPeak=std::max(operatingStats.nonlinearInputPeak,std::abs(storage[head]));
