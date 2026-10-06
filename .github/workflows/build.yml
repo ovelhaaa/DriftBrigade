@@ -139,6 +139,7 @@ jobs:
       - run: ./build/drift_bbd_realtime_qualification --tests-only
       - run: ./build/drift_bbd_realtime_qualification artifact --ci
       - run: ./build/drift_bbd_realtime_production_timing artifact --comparison --ci
+      - run: python3 tools/summarize_bbd_realtime.py artifact
       - run: cp docs/m2_8_bbd_realtime_hardening.md artifact/QUALIFICATION.md
       - uses: actions/upload-artifact@v4
         with:

@@ -324,7 +324,8 @@ void startupReport(const std::filesystem::path &root, bool local) {
            "compressor_level_before,compressor_gain_before,expander_level_"
            "before,expander_gain_before,return_peak,wet_peak,internal_peak,"
            "nonlinear_input_peak,expander_level_peak,sum_wet_peak,post_mix_"
-           "peak,single_voice_m26_path_peak,finite,clamps,guards,allocations");
+           "peak,single_voice_m26_path_peak,single_voice_m26_return_peak,"
+           "finite,clamps,guards,allocations");
   for (int noisy = 0; noisy < 2; ++noisy)
     for (int high = 0; high < 2; ++high)
       for (double silence : {0., .01, .1, .5, 2., 10.})
@@ -358,7 +359,7 @@ void startupReport(const std::filesystem::path &root, bool local) {
           e.qualificationClearMeasurements();
           single.qualificationClearMeasurements();
           Inspection m;
-          Meter baseline;
+          Meter baseline, baselineReturn;
           const auto before = allocations.load();
           for (int n = 0; n < int(48000 * (local ? .2 : .02)); ++n) {
             double x = kind < 3 ? std::pow(10., (kind == 0   ? -60
@@ -372,6 +373,7 @@ void startupReport(const std::filesystem::path &root, bool local) {
             auto y = e.processSample(x, x);
             m.sample(e, y);
             baseline.add(single.process(x, center, 0));
+            baselineReturn.add(single.feedbackWet());
           }
           require(engineFinite(e) && voiceFinite(single) &&
                       allocations.load() == before,
@@ -388,8 +390,9 @@ void startupReport(const std::filesystem::path &root, bool local) {
               << a.core.operatingStats.peak << ','
               << a.core.operatingStats.nonlinearInputPeak << ','
               << m.expander[i].peak << ',' << m.summedWet.peak << ','
-              << m.output.peak << ',' << baseline.peak << ",1," << c.clamps
-              << ',' << c.guards << ",0\n";
+              << m.output.peak << ',' << baseline.peak << ','
+              << baselineReturn.peak << ",1," << c.clamps << ',' << c.guards
+              << ",0\n";
           }
           f.flush();
         }
@@ -504,8 +507,9 @@ void recoveryReports(const std::filesystem::path &root) {
         nonfinite << "host,"
                   << (backend == DelayBackend::ExperimentalBBD ? "BBD"
                                                                : "Digital")
-                  << ',' << fault << ',' << channels << ",AUTO_RECOVERY,2048,0,"
-                  << m.peak << ',' << c.clamps << ',' << c.guards << ",1,1,0\n";
+                  << ',' << fault << ',' << channels
+                  << ",AUTOMATIC_RECOVERY,2048,0," << m.peak << ',' << c.clamps
+                  << ',' << c.guards << ",1,1,0\n";
       }
   for (int site = 0; site < 5; ++site)
     for (int fault = 0; fault < 3; ++fault) {
@@ -527,7 +531,7 @@ void recoveryReports(const std::filesystem::path &root) {
         if (recovery < 0 && engineFinite(e))
           recovery = n + 1;
       }
-      const char *classification = "AUTO_RECOVERY";
+      const char *classification = "AUTOMATIC_RECOVERY";
       if (!engineFinite(e)) {
         classification = "VOICE_RESET_REQUIRED";
         e.qualificationResetVoice(0, 0, seed);

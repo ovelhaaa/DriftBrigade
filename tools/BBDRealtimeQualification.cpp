@@ -460,6 +460,22 @@ void automationTests() {
                 before == allocations.load(),
             "automation state/clamps/allocations");
     disabled(e);
+    // Stress changed every smoother/modulation trajectory. Reset with matching
+    // current targets must reproduce fresh wet audio, not merely a dry path.
+    e.setParameters(normal());
+    e.reset(seed);
+    DriftEngine fresh;
+    configure(fresh, sr, 4096);
+    const auto replayAllocations = allocations.load();
+    for (int n = 0; n < 4096; ++n) {
+      auto a = e.processSample(material(3, n, sr), material(2, n, sr)),
+           b = fresh.processSample(material(3, n, sr), material(2, n, sr));
+      require(std::memcmp(a.data(), b.data(), sizeof(a)) == 0,
+              "automation stress reset fresh wet identity");
+    }
+    require(replayAllocations == allocations.load(),
+            "automation reset replay allocation free");
+    disabled(e);
   }
 }
 void faultTests() {
@@ -476,6 +492,8 @@ void faultTests() {
       for (int n = 0; n < 512; ++n)
         e.processSample(material(3, n, 48000), material(2, n, 48000));
       e.qualificationInject(0, 0, fault, value);
+      require(!engineFinite(e),
+              "fault hook actually corrupts observed state before recovery");
       const auto before = allocations.load();
       for (int n = 0; n < 1024; ++n)
         e.processSample(material(3, n, 48000), material(2, n, 48000));

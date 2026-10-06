@@ -17,6 +17,7 @@ drift_bbd_realtime_qualification --tests-only
 drift_bbd_realtime_qualification artifact --ci
 drift_bbd_realtime_qualification local-artifact --local
 drift_bbd_realtime_production_timing local-artifact --comparison --local
+python tools/summarize_bbd_realtime.py local-artifact
 ```
 
 `--timing-only`, `--reports-only`, `--denormals-only` and
@@ -73,9 +74,9 @@ method appear in every timing file. Operating distributions are never used to
 time the DSP.
 
 Normal uses the requested .7/.5/8/.55/.45/.6/.25/.12/1 macro fixture; heavy uses
-Motion10, Depth1, Chaos1, Coherence0, Width1, Dynamics1, Feedback.65, Mix1.
-Max clock uses Depth0, Feedback0 at Dmin; max clock+feedback uses Depth0,
-Feedback.65, Dynamics1 at 1.05Dmin. Max clock+modulation uses the heavy controls
+Motion 10, Depth1, Chaos1, Coherence0, Width1, Dynamics 1, Feedback .65, Mix1.
+Max clock uses Depth 0, Feedback 0 at Dmin; max clock+feedback uses Depth 0,
+Feedback .65, Dynamics 1 at 1.05Dmin. Max clock+modulation uses the heavy controls
 at 1.05Dmin, which admits nonzero excursion. There is no unique shortest real
 number greater than Dmin; 5% headroom is this explicit engineering fixture.
 
@@ -95,8 +96,8 @@ observes five minutes locally; CI's 0.1 s does not substitute for that evidence.
 
 ## 5–6. Feedback and DC
 
-Feedback0/.25/.5/.65 and maximum macro settings (requested .73, admitted
-parameter .65 plus Dynamics1) run through the real engine. Effective feedback
+Feedback 0/.25/.5/.65 and maximum macro settings (requested .73, admitted
+parameter .65 plus Dynamics 1) run through the real engine. Effective feedback
 is measured; the envelope-dependent term is bounded by .08 and the general
 guard by .75. A direct full-path voice qualifies .75 separately. Eight
 excitations include impulse, positive/negative DC, asymmetric pulse, 100/500 Hz
@@ -134,8 +135,12 @@ All eight pre-onset detector levels/gains and post-onset internal/nonlinear,
 return/wet/expander peaks are retained. Summed wet and post-mix peaks accompany
 an M2.6 `BBDFullPath`-based direct voice baseline. The latter receives full-band
 input instead of a bank output and independent fixture RNG seed; it is a
-comparison of headroom, not a claim of identical waveforms. Measurement-only
-counters clear at onset; DSP/detector/RNG state does not reset.
+comparison of headroom, not a claim of identical waveforms. The baseline
+retains a return peak before the DC blocker as well as its
+post-blocker output, so the M2.6 path comparison does not hide this distinction.
+sum_wet_peak adds all eight voices including L/R; the engine sums four per
+channel, and post_mix_peak reports the actual per-channel output peak.
+Counters clear at onset; DSP/detector/RNG state does not reset.
 
 ## 8–10. Hostile input and recovery
 
@@ -158,7 +163,7 @@ Valid finite DigitalFractional output retains its existing regression oracle.
 
 Qualification-only hooks inject feedback, held output, a live bucket and both
 detectors. Hooks are absent from ordinary production builds. Each reports
-AUTO_RECOVERY, VOICE_RESET_REQUIRED or ENGINE_RESET_REQUIRED after 1024 samples.
+AUTOMATIC_RECOVERY, VOICE_RESET_REQUIRED or ENGINE_RESET_REQUIRED after 1024 samples.
 Artificial state corruption does not justify changing detector equations.
 Explicit engine reset is always compared with a fresh seeded engine.
 
@@ -230,7 +235,12 @@ are explicit remaining product blockers; no default is altered to hide them.
 
 `DriftBrigade-M2.8-BBD-Realtime-Hardening` contains all 14 required CSVs, README,
 raw callbacks, direct/engine feedback evolution, segmentation summary and
-production-counter comparison. Existing milestone jobs/artifacts are preserved.
+production-counter comparison. The standard-library Python summary checks that
+all required reports completed, verifies their numerical/allocation gates,
+exports all-voice late-tail trends and paired nonlinear asymmetry contribution,
+and writes SUMMARY.json. It never rejects a CPU duration or miss count. CI
+short tails explicitly lack eight late windows; absence of their trend flag is
+not a long-run stability result. Existing milestone jobs/artifacts are preserved.
 The new artifact job depends on dsp/sanitize. The short numerical suite is in
 CTest, with ASan/UBSan on its instrumented target. Plugin/default-route tests
 remain in the existing Windows job. No absolute CPU acceptance is in CI.
@@ -268,9 +278,17 @@ The worst full-matrix observed utilization was 386.4%, at176.4k/N1024/block1024
 max clock, in a 32-callback cell. All 32 missed. It is a coarse worst observed
 sample, not a 10,000-callback percentile or a guaranteed bound. The detailed
 raw files and matrix keep misses separated by rate, block, stage and load.
-All measured cells had zero hidden clamps and numerical guards.
+All instrumented cells had zero hidden clamps and numerical guards.
+The production-counter companion measured primary/companion median ratios
+1.010/1.011/1.024/1.027/1.040/1.011 for these six cases, respectively. These
+sequential observations do not isolate frequency/OS variability. 192 kHz and
+88.2k boundary cases still missed 100% of deadlines in the companion build;
+48k maximum-clock block16 had 63 misses, despite a lower median. Tail differences
+must not be attributed solely to instrumentation overhead. The companion has
+no instrumented clamp/guard counters; their reserved zero CSV fields represent
+compiled-out measurement, with admission verified by the instrumented counterpart.
 
-The 18 sustained60s cells finished finite with zero processing allocations,
+The 18 sustained 60 s cells finished finite with zero processing allocations,
 hidden clamps and numerical guards. Worst internal input peak was1.45835,
 output peak.70498 and absolute post-blocker cumulative DC6.28147e-5. Maximum
 observed sustained callback was9.0613ms (deadline2.6667ms at48k/block128),
@@ -278,8 +296,45 @@ reinforcing that short nominal comfort does not establish worst-case safety.
 The sustained CSV's detector maxima concern voice0; all voices undergo finite
 state checks, and separate feedback/startup CSVs retain per-voice detector data.
 
-Local CTest passed20/20, including all previous milestone numerical oracles,
+Local CTest passed 20/20, including all previous milestone numerical oracles,
 the extended hostile detector release tests and artifact stream failures.
+Additional final numerical checks confirmed immediate corruption by each fault
+hook and exact fresh wet output after aggressive automation at all six rates.
 VST3/Standalone built, and plugin state/default routing passed. Numerical gates
 require no hidden clamp for admitted trajectories and zero allocation in the
-tested realtime operations. Raw backend0 denotes DigitalFractional,1 BBD.
+tested realtime operations. Raw backend 0 denotes DigitalFractional, 1 BBD.
+
+Feedback produced 432 checkpoint rows (120 eight-voice fixtures and24 direct
+voice fixtures, each 2/10/30 s). Maximum effective engine feedback was.729963;
+the direct voice reached.75. Across all eight engine voices, final noise-free
+window DC/RMS were0; noise-on maxima were1.178e-9 absolute DC and4.155e-8 RMS.
+No case had strictly growing DC or RMS across its final eight windows. This
+supports these tested trajectories, not unrestricted feedback stability.
+Paired positive/negative DC burst comparisons found a maximum nonlinear even
+contribution.022065 for ordinary-level fixtures (feedback<=.65), versus zero in
+the linear fixture. The deliberately scaled100-level maximum-feedback burst
+had contribution-11.0208; that extreme is not an ordinary audio calibration.
+
+Startup produced 1152 per-voice rows across 144 fixtures. Largest actual
+per-channel post-mix peak was.83908, against.84226 for its direct path fixture;
+the corresponding raw direct return peak was.83450. However, some individual
+fixtures exceeded their matching direct-path output: the largest ratio1.45605
+occurred with a broadband burst after 10 s at nominal clock with noise enabled
+(.08092 engine versus.05558 direct). This is a measured multiband/startup
+headroom concern for later product work, not a new limiter/gain decision.
+Maximum internal/nonlinear startup input peak was1.45854. Adding the pre-DC
+baseline measurement preserved every pre-existing startup CSV value exactly.
+
+Host NaN/±Inf recovered automatically with exact zero-substitution equivalence.
+Of 15 artificial internal faults, 10 recovered automatically and 5 required voice
+reset; none required engine reset after voice reset. Explicit engine reset
+always restored fresh seeded output. Worst hostile detector recovery into the
+unity startup range was 10032 samples / 209 ms. Both denormal tails (300 s nominal,
+60 s max clock) reported zero subnormal observations; interval-median block128
+durations were approximately.449ms and1.363ms, respectively.
+
+All 14 CI jobs passed before this artifact-summary/pre-DC-baseline update
+(run 37417857581). The final-head CI status and artifact link are recorded in the
+PR; CPU misses are informational. No numerical blocker was observed in these
+fixtures. High-rate minimum-delay deadline failure and configuration-dependent
+startup amplification remain explicit barriers to unrestricted BBD readiness.
