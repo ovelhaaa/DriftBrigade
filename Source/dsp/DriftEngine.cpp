@@ -50,8 +50,9 @@ void DriftEngine::reset(std::uint32_t seed) noexcept {
   if (backend == DelayBackend::ExperimentalBBD && qualificationCenter > 0)
     initialCenter = qualificationCenter;
 #endif
-  for (auto &ch : currentDelays)
-    ch.fill(initialCenter);
+    for (auto &ch : currentDelays) {
+        ch.fill(initialCenter);
+    }
     if (backend == DelayBackend::ExperimentalBBD) for (auto& ch : currentDelays)
         for (auto& d:ch) d=bounded(d,minimumDelaySeconds(),maximumDelaySeconds());
     envelope.reset(); envelopeControl.reset(0); trace = {};

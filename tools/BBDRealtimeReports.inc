@@ -135,6 +135,14 @@ void longRunReport(const std::filesystem::path &root, bool local) {
     }
 }
 void feedbackReport(const std::filesystem::path &root, bool local) {
+  auto voices =
+      file(root, "bbd_realtime_feedback_voices.csv",
+           "noise_enabled,nonlinearity_enabled,feedback_requested,stimulus,"
+           "time_seconds,voice,window_return_dc,window_return_rms,window_"
+           "return_peak,window_post_dc_dc,window_post_dc_rms,bucket_mean_"
+           "snapshot,compressor_level,expander_level,compressor_gain,expander_"
+           "gain,internal_peak,nonlinear_input_peak,window_rms_change_db_per_"
+           "second,window_dc_change_per_second,rate_valid");
   auto f = file(
       root, "bbd_realtime_feedback_longrun.csv",
       "scope,backend,noise_enabled,nonlinearity_enabled,feedback_requested,"
@@ -171,7 +179,8 @@ void feedbackReport(const std::filesystem::path &root, bool local) {
           v.prepare(48000, cfg);
           v.enableOperatingInstrumentation(true);
           Meter ret, out, windowRet, windowOut;
-          Inspection inspect;
+          Inspection inspect, windowInspect;
+          std::array<double, 8> previousWindowRms{}, previousWindowDC{};
           std::array<std::complex<double>, 5> phase{}, rotation{}, harmonics{};
           phase.fill({1, 0});
           for (int h = 0; h < 5; ++h)
@@ -201,6 +210,7 @@ void feedbackReport(const std::filesystem::path &root, bool local) {
               y = a[0];
               r = e.bbdVoice(0, 0).feedbackWet();
               inspect.sample(e, a);
+              windowInspect.sample(e, a);
               feedbackMax =
                   std::max(feedbackMax, e.telemetry().effectiveFeedback);
             }
@@ -216,6 +226,36 @@ void feedbackReport(const std::filesystem::path &root, bool local) {
               phase[h] *= rotation[h];
             }
             if ((n + 1) % int(window * 48000) == 0) {
+              if (!direct)
+                for (int i = 0; i < 8; ++i) {
+                  const auto &v = e.bbdVoice(i / 4, i % 4);
+                  const auto &p = v.signalPath();
+                  double rms = windowInspect.returns[i].rms(),
+                         dc = windowInspect.returns[i].dc();
+                  bool valid = (n + 1) > int(window * 48000);
+                  double rate =
+                      valid && rms > 0 && previousWindowRms[i] > 0
+                          ? 20 * std::log10(rms / previousWindowRms[i]) / window
+                          : 0;
+                  voices << (variant == 0) << ',' << (variant != 2) << ',' << fb
+                         << ',' << kind << ',' << (n + 1) / 48000. << ',' << i
+                         << ',' << dc << ',' << rms << ','
+                         << windowInspect.returns[i].peak << ','
+                         << windowInspect.wet[i].dc() << ','
+                         << windowInspect.wet[i].rms() << ',' << bucketMean(v)
+                         << ',' << p.compressor.levelAverager().value() << ','
+                         << p.expander.levelAverager().value() << ','
+                         << p.compressor.currentGain() << ','
+                         << p.expander.currentGain() << ','
+                         << p.core.operatingStats.peak << ','
+                         << p.core.operatingStats.nonlinearInputPeak << ','
+                         << rate << ','
+                         << (valid ? (dc - previousWindowDC[i]) / window : 0)
+                         << ',' << valid << '\n';
+                  previousWindowRms[i] = rms;
+                  previousWindowDC[i] = dc;
+                }
+              windowInspect = {};
               const auto &voice = direct ? v : e.bbdVoice(0, 0);
               const auto &path = voice.signalPath();
               require(direct ? voiceFinite(v) : engineFinite(e),
@@ -273,6 +313,7 @@ void feedbackReport(const std::filesystem::path &root, bool local) {
           }
           f.flush();
           evolution.flush();
+          voices.flush();
         }
       }
 }
@@ -357,7 +398,8 @@ void recoveryReports(const std::filesystem::path &root) {
   auto hostile = file(root, "bbd_realtime_hostile_input.csv",
                       "amplitude,pattern,frames,output_peak,output_rms,"
                       "compressor_level,expander_level,clamps,guards,finite,"
-                      "recovery_frames,reset_bit_identity,allocations");
+                      "recovery_frames,reset_bit_identity,allocations,detector_"
+                      "recovery_frames");
   auto reset = file(root, "bbd_realtime_reset_recovery.csv",
                     "stress,amplitude,pattern,reset_seed,compared_frames,bit_"
                     "identity,finite,allocations");
@@ -385,11 +427,22 @@ void recoveryReports(const std::filesystem::path &root) {
         }
         auto c = counts(e);
         require(engineFinite(e), "hostile finite state report");
-        int recovery = 0;
-        for (int n = 0; n < 4800; ++n) {
+        int recovery = 0, detectorRecovery = 0;
+        for (int n = 0; n < 20000; ++n) {
           e.processSample(material(3, n, 48000), material(2, n, 48000));
           if (!recovery && engineFinite(e))
             recovery = n + 1;
+          if (!detectorRecovery) {
+            bool recovered = true;
+            for (int ch = 0; ch < 2; ++ch)
+              for (int b = 0; b < 4; ++b) {
+                const auto &p = e.bbdVoice(ch, b).signalPath();
+                recovered &= p.compressor.levelAverager().value() <= 1 &&
+                             p.expander.levelAverager().value() <= 1;
+              }
+            if (recovered)
+              detectorRecovery = n + 1;
+          }
         }
         const auto &path = e.bbdVoice(0, 0).signalPath();
         double comp = path.compressor.levelAverager().value(),
@@ -401,11 +454,13 @@ void recoveryReports(const std::filesystem::path &root) {
                b = fresh.processSample(material(3, n, 48000), 0);
           identical &= std::memcmp(a.data(), b.data(), sizeof(a)) == 0;
         }
-        require(identical && before == allocations.load(),
+        require(identical && detectorRecovery > 0 &&
+                    before == allocations.load(),
                 "hostile reset identity report");
         hostile << sign * amplitude << ',' << pattern << ",128," << output.peak
                 << ',' << output.rms() << ',' << comp << ',' << exp << ','
-                << c.clamps << ',' << c.guards << ",1," << recovery << ",1,0\n";
+                << c.clamps << ',' << c.guards << ",1," << recovery << ",1,0,"
+                << detectorRecovery << '\n';
         reset << "finite_hostile," << sign * amplitude << ',' << pattern << ','
               << seed << ",512,1,1,0\n";
       }
@@ -617,9 +672,9 @@ void stageReport(const std::filesystem::path &root, bool local) {
       double fundamental = 2 * std::abs(h[0]) / frames, distortion = 0;
       for (int i = 1; i < 5; ++i)
         distortion += std::norm(h[i]);
-      f << (local ? "LOCAL_1S" : "CI_SHORT_NON_INTEGER_WINDOWS") << ',' << sr
-        << ',' << n << ",0.008," << n / (sr * 128) << ',' << c.clock << ','
-        << c.events << ',' << out.peak << ',' << out.rms();
+      f << (local ? "LOCAL_1S" : "CI_SHORT_10_CYCLES") << ',' << sr << ',' << n
+        << ",0.008," << n / (sr * 128) << ',' << c.clock << ',' << c.events
+        << ',' << out.peak << ',' << out.rms();
       for (auto x : h)
         f << ',' << 2 * std::abs(x) / frames;
       f << ','

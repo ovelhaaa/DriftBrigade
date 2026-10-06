@@ -221,6 +221,19 @@ void prepareTests() {
     for (int n = 0; n < 64; ++n)
       e.processSample(material(3, n, 48000), 0);
     require(engineFinite(e), "normalized host rate finite");
+    e.prepare(48000, seed);
+    e.reset(seed);
+    DriftEngine fresh;
+    configure(fresh, 48000, 1024);
+    const auto before = allocations.load();
+    for (int n = 0; n < 512; ++n) {
+      auto a = e.processSample(material(3, n, 48000), 0),
+           b = fresh.processSample(material(3, n, 48000), 0);
+      require(std::memcmp(a.data(), b.data(), sizeof(a)) == 0,
+              "invalid rate valid reprepare identity");
+    }
+    require(before == allocations.load(),
+            "reprepared callbacks allocation free");
   }
   auto c = BBDVoiceConfig::fullResearchFixture();
   c.character.insertionDb = std::numeric_limits<double>::quiet_NaN();
@@ -229,11 +242,34 @@ void prepareTests() {
   c.character.nonlinear.strength = std::numeric_limits<double>::quiet_NaN();
   c.gainStaging.compressorToBBDGain = std::numeric_limits<double>::quiet_NaN();
   c.gainStaging.bbdToExpanderGain = -1;
+  c.gainStaging.preCompressorGain = std::numeric_limits<double>::infinity();
+  c.gainStaging.postExpanderGain = 0;
+  c.gainStaging.nonlinearReferenceLevel =
+      std::numeric_limits<double>::quiet_NaN();
   DriftEngine e;
   configure(e, 48000, 1024, normal(), 0, c);
+  const auto &normalized = e.bbdVoice(0, 0).signalPath().gainStaging();
+  require(normalized.preCompressorGain == 1 &&
+              normalized.compressorToBBDGain == 1 &&
+              normalized.bbdToExpanderGain == 1 &&
+              normalized.postExpanderGain == 1 &&
+              normalized.nonlinearReferenceLevel == 1,
+          "invalid gain staging uses existing unity normalization");
   for (int n = 0; n < 512; ++n)
     e.processSample(material(3, n, 48000), 0);
   require(engineFinite(e), "invalid character/gain normalization");
+  e.reset(seed);
+  DriftEngine fresh;
+  configure(fresh, 48000, 1024, normal(), 0, c);
+  const auto before = allocations.load();
+  for (int n = 0; n < 512; ++n) {
+    auto a = e.processSample(material(3, n, 48000), 0),
+         b = fresh.processSample(material(3, n, 48000), 0);
+    require(std::memcmp(a.data(), b.data(), sizeof(a)) == 0,
+            "normalized character gains reset identity");
+  }
+  require(before == allocations.load(),
+          "normalized character callbacks allocation free");
 }
 void clockTests() {
   for (double sr : rates)
@@ -302,6 +338,19 @@ void hostileTests() {
                   "finite hostile input output");
         }
         require(engineFinite(e), "finite hostile state");
+        for (int n = 0; n < 20000; ++n) {
+          auto y =
+              e.processSample(material(3, n, 48000), material(2, n, 48000));
+          require(std::isfinite(y[0]) && std::isfinite(y[1]),
+                  "hostile ordinary input recovery");
+        }
+        for (int ch = 0; ch < 2; ++ch)
+          for (int b = 0; b < 4; ++b) {
+            const auto &path = e.bbdVoice(ch, b).signalPath();
+            require(path.compressor.levelAverager().value() <= 1 &&
+                        path.expander.levelAverager().value() <= 1,
+                    "hostile detectors release back into unity startup range");
+          }
         e.reset(seed);
         disabled(e);
         for (int n = 0; n < 128; ++n) {
@@ -875,7 +924,7 @@ int main(int argc, char **argv) {
     if (argc > 1 && std::string(argv[1]) != "--tests-only") {
       bool local = false, comparison = false, denormalsOnly = false,
            denormalsHigh = false, timingOnly = false, reportsOnly = false,
-           feedbackOnly = false;
+           feedbackOnly = false, startupOnly = false, recoveryOnly = false;
       for (int i = 2; i < argc; ++i) {
         local |= std::string(argv[i]) == "--local";
         comparison |= std::string(argv[i]) == "--comparison";
@@ -884,6 +933,8 @@ int main(int argc, char **argv) {
         timingOnly |= std::string(argv[i]) == "--timing-only";
         reportsOnly |= std::string(argv[i]) == "--reports-only";
         feedbackOnly |= std::string(argv[i]) == "--feedback-only";
+        startupOnly |= std::string(argv[i]) == "--startup-only";
+        recoveryOnly |= std::string(argv[i]) == "--recovery-only";
       }
       std::filesystem::create_directories(argv[1]);
       auto readme =
@@ -903,6 +954,15 @@ int main(int argc, char **argv) {
                 "scope and limitations.\n";
       readme.flush();
 #ifdef DRIFT_BBD_INSTRUMENT
+      if (recoveryOnly) {
+        recoveryReports(argv[1]);
+        prepareReport(argv[1]);
+        return 0;
+      }
+      if (startupOnly) {
+        startupReport(argv[1], local);
+        return 0;
+      }
       if (feedbackOnly) {
         feedbackReport(argv[1], local);
         return 0;

@@ -20,7 +20,8 @@ drift_bbd_realtime_production_timing local-artifact --comparison --local
 ```
 
 `--timing-only`, `--reports-only`, `--denormals-only` and
-`--denormals-high` allow independent investigations. A partial run's README
+`--denormals-high`, `--feedback-only`, `--startup-only`, `--recovery-only`
+allow independent investigations. A partial run's README
 describes the selected duration policy, not confirmation that every report
 finished. A nonzero exit means numerical or artifact I/O failure. Every output
 stream enables fail/bad exceptions and explicitly flushes. README is flushed
@@ -84,6 +85,10 @@ All six materials (silence, 500 Hz sine, deterministic broadband, program,
 repeated transient, alternating loud/quiet) run at nominal, high clock and high
 feedback. Local duration is 60 s per cell; CI is 0.1 s and labelled CI_SHORT.
 Monitoring and callback timing repeat the input/seed in separate passes.
+The monitor uses double samples; callback input is quantized to float. The
+material formula and seed are shared, rather than claiming bit-identical states
+between precision variants. Strict reset/segmentation comparisons use matched
+input precision.
 Reports include output DC/RMS/peak, internal/nonlinear peaks, detector peaks,
 events, phase, maximum callback, clamps and guards. A separate noise-free decay
 observes five minutes locally; CI's 0.1 s does not substitute for that evidence.
@@ -97,6 +102,9 @@ guard by .75. A direct full-path voice qualifies .75 separately. Eight
 excitations include impulse, positive/negative DC, asymmetric pulse, 100/500 Hz
 bursts, broadband and silence. Excitation is finite (1 s locally, .01 s CI),
 followed by silence. The silence fixture is an unexcited control.
+The maximum-macro fixture scales excitation by500 to approach the engine's
+envelope-dependent .73 asymptote through its normal envelope and smoothing,
+using admitted finite audio. Effective feedback remains a measured CSV value.
 
 Local checkpoints are cumulative 2/10/30 s; CI .02/.1/.25 s. Noise-on,
 noise-off and noise-off/nonlinearity-strength-zero research comparisons isolate
@@ -108,6 +116,11 @@ stationary THD. Window evolution provides DC/loop decay evidence; a strictly
 increasing absolute DC over the last eight windows is a review flag, not an
 arbitrary absolute DC acceptance threshold. Noise-on decay is compared against
 its noise floor. Stable nonzero internal DC remains a product/topology concern.
+Additional per-window CSVs retain all eight voices' DC/RMS, bucket snapshots,
+gains and RMS/DC change rates. The first window has rate_valid=0; silent
+zero-to-zero RMS change reports0 rather than an undefined logarithm. Ordinary
+compressor release toward the existing numerical floor is distinguished from
+drift under steady excitation.
 Continuous growth, detector drift, failure to decay without noise, or approach
 to numerical limits is a blocker requiring investigation, not a topology change
 hidden in this milestone.
@@ -130,6 +143,11 @@ Both signs of 1/2/16/100/1e6/float_max run as impulse/DC/alternating/burst,
 followed by valid input and a deterministic reset comparison. Recovery frames
 in that CSV mean state finiteness, not completion of ordinary detector release.
 All output/state/phase remain finite, and processing/reset allocate nothing.
+Both processSample and actual float callbacks are exercised. After extreme
+input, 20,000 valid frames verify detector release below the existing unity
+startup level. detector_recovery_frames measures that explicit engineering
+criterion across all eight voices, separately from immediate state finiteness;
+it is not an audio-fidelity tolerance.
 
 The previous generic `bounded(nonfinite, -float_max, float_max)` selected the
 negative bound for NaN/Inf, producing a huge excitation instead of silence.
@@ -167,8 +185,8 @@ not allocate. No partial configuration enters active processing.
 The full timing matrix observes every rate and stage independently, including
 176.4 kHz. A paired noise-on/off, fixed8ms, 500 Hz spectral experiment reports
 H1–H5, projected THD and noise difference. Local settling/observation is .5/1 s;
-CI .02/.02 s contains noninteger windows at some rates and is not an audio-quality
-decision. Stage selection remains deferred; at Dmin the common event cap, rather
+CI .02/.02 s observes only10 tone cycles after short settling and is not an
+audio-quality decision. Stage selection remains deferred; at Dmin the common event cap, rather
 than N, dominates cost, while fixed delay scales clock with N.
 
 All nine controls undergo deterministic steps and ramps through existing
@@ -251,3 +269,17 @@ max clock, in a 32-callback cell. All 32 missed. It is a coarse worst observed
 sample, not a 10,000-callback percentile or a guaranteed bound. The detailed
 raw files and matrix keep misses separated by rate, block, stage and load.
 All measured cells had zero hidden clamps and numerical guards.
+
+The 18 sustained60s cells finished finite with zero processing allocations,
+hidden clamps and numerical guards. Worst internal input peak was1.45835,
+output peak.70498 and absolute post-blocker cumulative DC6.28147e-5. Maximum
+observed sustained callback was9.0613ms (deadline2.6667ms at48k/block128),
+reinforcing that short nominal comfort does not establish worst-case safety.
+The sustained CSV's detector maxima concern voice0; all voices undergo finite
+state checks, and separate feedback/startup CSVs retain per-voice detector data.
+
+Local CTest passed20/20, including all previous milestone numerical oracles,
+the extended hostile detector release tests and artifact stream failures.
+VST3/Standalone built, and plugin state/default routing passed. Numerical gates
+require no hidden clamp for admitted trajectories and zero allocation in the
+tested realtime operations. Raw backend0 denotes DigitalFractional,1 BBD.
