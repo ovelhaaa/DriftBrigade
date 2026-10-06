@@ -193,3 +193,34 @@ target_compile_definitions(drift_bbd_realtime_production_timing PRIVATE DRIFT_BB
 if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(drift_bbd_realtime_production_timing PRIVATE -femulated-tls)
 endif()
+
+# M2.9 qualification-only product policy; no public admission or DSP changes.
+add_executable(drift_bbd_product_envelope_qualification tools/BBDProductEnvelopeQualification.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_product_envelope_qualification PRIVATE Source)
+target_compile_definitions(drift_bbd_product_envelope_qualification PRIVATE
+  DRIFT_PRODUCT_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+target_compile_definitions(drift_bbd_product_envelope_qualification PRIVATE DRIFT_BBD_INSTRUMENT=1 DRIFT_BBD_REALTIME_QUALIFY=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_product_envelope_qualification PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_product_envelope_qualification PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_product_envelope_qualification PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_product_envelope_numerical COMMAND drift_bbd_product_envelope_qualification --tests-only)
+add_test(NAME bbd_product_envelope_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_product_envelope_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-product-stream-tests
+  -DBLOCKED_ARTIFACT=README.txt
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+
+# Production-counter timing companion: full qualification is gated by the instrumented target.
+add_executable(drift_bbd_product_envelope_production_timing tools/BBDProductEnvelopeQualification.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_product_envelope_production_timing PRIVATE Source)
+target_compile_definitions(drift_bbd_product_envelope_production_timing PRIVATE
+  DRIFT_BBD_REALTIME_QUALIFY=1 DRIFT_PRODUCT_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_product_envelope_production_timing PRIVATE -femulated-tls)
+endif()

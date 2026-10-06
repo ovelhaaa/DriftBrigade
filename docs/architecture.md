@@ -81,3 +81,14 @@ DigitalFractional routing are preserved. See
 reset/recovery contract, instrumentation methodology and research-only scope.
 
 Production/default routing remains `DigitalFractional` and preserves the merged M2.6 engine bit for bit. An internal pre-prepare selector can instantiate eight dedicated BBD voices alongside the unchanged four-band bank. `BBDFullPath` is the single reusable qualified signal implementation; the historical qualification name is an alias. Expanded/reconstructed wet returns before the output-only 5 Hz DC blocker. BBD minimum delay is N/(128*hostRate), and engine Center/excursion/reset history are admitted before per-sample variable-clock processing. No additional clock smoothing, parameter, preset, UI or runtime switching is added. The seed hash excludes channel index and differs by band. All new operating statistics are instrumented only. See [M2.7 integration](m2_7_bbd_engine_integration.md) for fixture labels, physical limits and measurement scope. The M2.0 description above records the earlier research-only state; M2.7 now adds the internal engine path.
+
+## M2.9 qualification-only product envelope
+
+MODEL CAPABILITY remains separate from ENGINEERING PRODUCT ENVELOPE. The
+new tool defines four stage/clock/event hypotheses, measures repeated callback
+tails, musical coverage, gain/headroom and feedback DC, and compares a dedicated
+feedback blocker only in its own harness. Its production-counter companion
+checks variable-clock cost without measurement statistics. No admission policy
+is installed in the engine; core limits, digital routing, state and public
+parameters are unchanged. A PRODUCTIZATION CANDIDATE is NOT FINAL SHIPPING
+DEFAULT. See [M2.9 methodology and findings](m2_9_bbd_product_envelope.md).

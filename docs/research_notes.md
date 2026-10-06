@@ -122,3 +122,16 @@ defaults. Noise-off/nonlinearity-off comparisons are labelled measurement
 fixtures. Minimum-delay high-rate deadline failures prevent an unrestricted BBD
 realtime claim. DigitalFractional remains production/default. See
 [M2.8 report](m2_8_bbd_realtime_hardening.md) for provenance and limits.
+
+# M2.9 product-envelope qualification
+
+M2.8 is QUALIFIED PREVIOUS MILESTONE evidence for model robustness, including
+uncomfortable maximum-clock realtime corners. M2.8.1 fixes immediate hostile
+state-recovery reporting (0 frames) without changing detector recovery or DSP.
+M2.9 investigates 512/1024/2048/4096 stages with event ceilings below the
+128-edge MODEL CAPABILITY. Repeated CPU, response/noise/distortion, onset
+headroom, parameter coverage and feedback/DC evidence stay separately visible.
+Only the qualification harness contains the experimental feedback blocker.
+ENGINEERING PRODUCT ENVELOPE and PRODUCTIZATION CANDIDATE labels do not imply
+FINAL SHIPPING DEFAULT. All prior CI jobs/artifacts remain; new hosted timing
+is informational. See [M2.9 report](m2_9_bbd_product_envelope.md).
