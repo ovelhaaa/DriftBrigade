@@ -129,3 +129,19 @@ jobs:
         with:
           name: DriftBrigade-M2.7-BBD-Engine-Qualification
           path: artifact/
+  bbd-realtime-qualification:
+    needs: [dsp, sanitize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target drift_bbd_realtime_qualification drift_bbd_realtime_production_timing --parallel 2
+      - run: ./build/drift_bbd_realtime_qualification --tests-only
+      - run: ./build/drift_bbd_realtime_qualification artifact --ci
+      - run: ./build/drift_bbd_realtime_production_timing artifact --comparison --ci
+      - run: python3 tools/summarize_bbd_realtime.py artifact
+      - run: cp docs/m2_8_bbd_realtime_hardening.md artifact/QUALIFICATION.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M2.8-BBD-Realtime-Hardening
+          path: artifact/

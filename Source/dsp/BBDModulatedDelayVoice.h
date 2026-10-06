@@ -3,6 +3,15 @@
 namespace drift {
 enum class DelayBackend { DigitalFractional, ExperimentalBBD };
 enum class BBDFeedbackTopology { ExternalWetReturn };
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+enum class BBDQualificationFault {
+  Feedback,
+  Held,
+  Bucket,
+  CompressorDetector,
+  ExpanderDetector
+};
+#endif
 // QUALIFICATION FIXTURE / ENGINEERING NORMALIZATION / NOT PRODUCT DEFAULT.
 struct BBDVoiceConfig {
   std::size_t physicalStages = 1024;
@@ -76,9 +85,10 @@ public:
       ++numericalGuards;
 #endif
     }
+    path.core.clearSubnormalFilterState();
     previousWet =
         wet; // Expanded/reconstructed return BEFORE output DC blocker.
-    dcState = wet - previousInput + pole * dcState;
+    dcState = flushSubnormal(wet - previousInput + pole * dcState);
     previousInput = wet;
     return dcState;
   }
@@ -91,6 +101,40 @@ public:
   }
   const BBDFullPath &signalPath() const noexcept { return path; }
   double feedbackWet() const noexcept { return previousWet; }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInject(BBDQualificationFault fault, double value) noexcept {
+    switch (fault) {
+    case BBDQualificationFault::Feedback:
+      previousWet = value;
+      break;
+    case BBDQualificationFault::Held:
+      path.core.qualificationInject(false, value);
+      break;
+    case BBDQualificationFault::Bucket:
+      path.core.qualificationInject(true, value);
+      break;
+    case BBDQualificationFault::CompressorDetector:
+      path.compressor.qualificationInjectDetector(value);
+      break;
+    case BBDQualificationFault::ExpanderDetector:
+      path.expander.qualificationInjectDetector(value);
+      break;
+    }
+  }
+  void qualificationInjectTail(double value) noexcept {
+    path.core.qualificationInjectTail(value);
+    dcState = value;
+  }
+  double qualificationDCState() const noexcept { return dcState; }
+#ifdef DRIFT_BBD_INSTRUMENT
+  void qualificationClearMeasurements() noexcept {
+    hiddenClamps = numericalGuards = 0;
+    path.core.operatingStats = {};
+    std::fill(path.core.captureTimes.begin(), path.core.captureTimes.end(),
+              -1.0);
+  }
+#endif
+#endif
   bool finiteState() const noexcept {
     return path.core.finiteState() && std::isfinite(previousWet) &&
            std::isfinite(dcState) &&

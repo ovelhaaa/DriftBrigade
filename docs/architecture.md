@@ -72,4 +72,12 @@ For N stages, `fclock=N/(2D)` and event rate is `2*fclock`. Each host sample add
 
 ## M2.7 internal BBD backend
 
+M2.8 adds qualification-only model-boundary/fault hooks and the realtime harness.
+An unsuccessful prepare leaves processing inactive; host nonfinite samples admit
+zero. BBD-only IEEE underflow-tail clearing prevents persistent subnormal filter,
+bank and control state, without global FTZ/DAZ. Signal coefficients and default
+DigitalFractional routing are preserved. See
+[M2.8 hardening](m2_8_bbd_realtime_hardening.md) for measured deadline limitations,
+reset/recovery contract, instrumentation methodology and research-only scope.
+
 Production/default routing remains `DigitalFractional` and preserves the merged M2.6 engine bit for bit. An internal pre-prepare selector can instantiate eight dedicated BBD voices alongside the unchanged four-band bank. `BBDFullPath` is the single reusable qualified signal implementation; the historical qualification name is an alias. Expanded/reconstructed wet returns before the output-only 5 Hz DC blocker. BBD minimum delay is N/(128*hostRate), and engine Center/excursion/reset history are admitted before per-sample variable-clock processing. No additional clock smoothing, parameter, preset, UI or runtime switching is added. The seed hash excludes channel index and differs by band. All new operating statistics are instrumented only. See [M2.7 integration](m2_7_bbd_engine_integration.md) for fixture labels, physical limits and measurement scope. The M2.0 description above records the earlier research-only state; M2.7 now adds the internal engine path.

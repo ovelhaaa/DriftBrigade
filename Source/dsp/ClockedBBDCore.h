@@ -1,8 +1,8 @@
 #pragma once
-#include "DspMath.h"
-#include "BBDGainStaging.h"
 #include "AsyncAnalogFilter.h"
 #include "BBDDeviceCharacter.h"
+#include "BBDGainStaging.h"
+#include "DspMath.h"
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -28,9 +28,9 @@ public:
     void reseedCharacter(std::uint32_t seed) noexcept { character.reseed(seed); }
     void setDelaySeconds(double seconds) noexcept;
     // Qualification only: configure before prepare/reset. Clock transition/cache
-    // rebuilds preserve bucket memory, scheduler phase, filter state, held output,
-    // character state and RNG state.
-    void setQualificationMode(BBDMode mode,BBDFilterProfile profile=BBDFilterProfile::ValidationPrototype) noexcept;
+  // rebuilds preserve bucket memory, scheduler phase, filter state, held
+  // output, character state and RNG state.
+  void setQualificationMode(BBDMode mode,BBDFilterProfile profile=BBDFilterProfile::ValidationPrototype) noexcept;
     // Internal qualification configuration: set before prepare.
     void setCharacterConfig(BBDCharacterConfig config) noexcept { character.configure(config); }
     void setOperatingDomain(double inputGain=1, double outputGain=1, double reference=1) noexcept {
@@ -45,6 +45,24 @@ public:
     double inputFilterValue() const noexcept { return inputFilter.value(); }
     double outputFilterValue() const noexcept { return outputFilter.value(); }
     bool finiteState() const noexcept;
+  void clearSubnormalFilterState() noexcept {
+    inputFilter.clearSubnormalState();
+    outputFilter.clearSubnormalState();
+  }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  // Fault injection exists only in the M2.8 qualification executables.
+  void qualificationInjectTail(double value) noexcept {
+    inputFilter.qualificationInjectTail(value);
+    outputFilter.qualificationInjectTail(value);
+  }
+  void qualificationInject(bool bucket, double value) noexcept {
+    if (bucket) {
+      if (!storage.empty())
+        storage[(head + 1) % storage.size()] = value;
+    } else
+      held = value;
+  }
+#endif
 #ifdef DRIFT_BBD_INSTRUMENT
     struct InputOperatingStats {
         std::uint64_t count=0, nominalCount=0, usefulCount=0;
@@ -75,4 +93,4 @@ private:
     BBDDeviceCharacter character;
     BBDTelemetry trace;
 };
-}
+} // namespace drift

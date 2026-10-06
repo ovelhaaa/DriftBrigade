@@ -12,6 +12,12 @@ public:
             coefficients[i] = g / (1.0 + g);
         }
         reset();
+  }
+  void clearSubnormalState() noexcept {
+    for (auto &x : state)
+      x = flushSubnormal(x);
+    for (auto &x : cascadeState)
+      x = flushSubnormal(x);
     }
     void setMode(BankMode value) noexcept { mode = value; }
     void reset() noexcept { state.fill(0); cascadeState.fill(0); }
@@ -39,9 +45,21 @@ public:
         }
         return {low[0], low[1]-low[0], low[2]-low[1], x-low[2]};
     }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInjectTail(double value) noexcept {
+    state.fill(value);
+    cascadeState.fill(value);
+  }
+  std::array<double, 9> qualificationState() const noexcept {
+    std::array<double, 9> result{};
+    std::copy(state.begin(), state.end(), result.begin());
+    std::copy(cascadeState.begin(), cascadeState.end(), result.begin() + 3);
+    return result;
+  }
+#endif
 private:
     BankMode mode = BankMode::Gentle;
     std::array<double, 3> coefficients {}, state {};
     std::array<double, 6> cascadeState {};
 };
-}
+} // namespace drift

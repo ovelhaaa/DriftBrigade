@@ -1,10 +1,10 @@
 #pragma once
-#include "MultiscaleBank.h"
-#include "FractionalDelay.h"
 #include "BBDModulatedDelayVoice.h"
-#include "OrganicModulator.h"
-#include "EnvelopeFollower.h"
 #include "DepthMapping.h"
+#include "EnvelopeFollower.h"
+#include "FractionalDelay.h"
+#include "MultiscaleBank.h"
+#include "OrganicModulator.h"
 #include "params/ParameterSpecs.h"
 #include <limits>
 namespace drift {
@@ -30,7 +30,58 @@ public:
         if (prepared) return false;
         backend = value; bbdConfig = config; return true;
     }
-    DelayBackend delayBackend() const noexcept { return backend; }
+  bool isPrepared() const noexcept { return prepared; }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  // Reach the model boundary below the product Center range, before prepare.
+  bool qualificationSetCenter(double seconds) noexcept {
+    if (prepared || !std::isfinite(seconds) || seconds <= 0)
+      return false;
+    qualificationCenter = seconds;
+    return true;
+  }
+  void qualificationInjectTail(double value) noexcept {
+    for (auto &bank : banks)
+      bank.qualificationInjectTail(value);
+    envelope.qualificationInjectTail(value);
+    envelopeControl.qualificationInjectTail(value);
+    for (auto &ch : bbdDelays)
+      for (auto &voice : ch)
+        voice.qualificationInjectTail(value);
+  }
+  auto qualificationBankState(std::size_t ch) const noexcept {
+    return banks[ch].qualificationState();
+  }
+  double qualificationEnvelopeState() const noexcept {
+    return envelope.qualificationState();
+  }
+  double qualificationEnvelopeControlState() const noexcept {
+    return envelopeControl.value();
+  }
+  void qualificationBeginCallback() noexcept {
+#ifdef DRIFT_BBD_INSTRUMENT
+    trace.maximumBBDEventsPerSample = 0;
+    trace.maximumBBDClock = 0;
+#endif
+  }
+  void qualificationInject(std::size_t ch, std::size_t band,
+                           BBDQualificationFault fault, double value) noexcept {
+    if (ch < 2 && band < 4)
+      bbdDelays[ch][band].qualificationInject(fault, value);
+  }
+  void qualificationResetVoice(std::size_t ch, std::size_t band,
+                               std::uint32_t seed) noexcept {
+    if (ch < 2 && band < 4)
+      bbdDelays[ch][band].reset(bbdBandSeed(seed ^ bbdConfig.seed, band));
+  }
+#ifdef DRIFT_BBD_INSTRUMENT
+  void qualificationClearMeasurements() noexcept {
+    for (auto &ch : bbdDelays)
+      for (auto &v : ch)
+        v.qualificationClearMeasurements();
+  }
+#endif
+#endif
+  DelayBackend delayBackend() const noexcept { return backend; }
     double minimumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? 4.0/sampleRate : double(bbdConfig.physicalStages)/(sampleRate*ClockedBBDCore::maximumEventsPerHostSample); }
     double maximumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? .055 : double(bbdConfig.physicalStages)/2; }
     const BBDModulatedDelayVoice& bbdVoice(std::size_t ch, std::size_t band) const noexcept { return bbdDelays[ch][band]; }
@@ -59,7 +110,10 @@ private:
     DelayBackend backend = DelayBackend::DigitalFractional;
     BBDVoiceConfig bbdConfig;
     bool prepared = false;
-    std::array<std::array<BBDModulatedDelayVoice,4>,2> bbdDelays;
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  double qualificationCenter = 0;
+#endif
+  std::array<std::array<BBDModulatedDelayVoice,4>,2> bbdDelays;
     double sampleRate = 48000; bool perceptualDepth = true;
     OrganicVariant organicVariant = OrganicVariant::Wander;
     BankMode bankMode = BankMode::Gentle;
@@ -74,4 +128,4 @@ private:
     std::array<std::array<double, 4>, 2> currentDelays {};
     Telemetry trace;
 };
-}
+} // namespace drift
