@@ -10,7 +10,9 @@ root = pathlib.Path(sys.argv[1])
 
 def rows(name):
     with (root / name).open(newline="", encoding="utf-8") as stream:
-        return list(csv.DictReader(stream))
+        data = list(csv.DictReader(stream))
+        assert all(None not in r and None not in r.values() for r in data), name
+        return data
 
 
 def write(name, data):
@@ -59,6 +61,29 @@ for r in floors:
 for r in rows("bbd_product_event_budget.csv"):
     assert abs(float(r["actual_edges_per_sample"])-float(r["target_edges_per_sample"])) < .01
 
+
+def classify_support(sr, long_run, static_median_util, mod_util, miss_runs):
+    if sr not in rates:
+        return "UNSUPPORTED_FOR_BBD", "sample_rate_not_in_investigated_set"
+    if not long_run:
+        return "EXPERIMENTAL", "CI_SHORT_does_not_establish_product_support"
+    if (mod_util is not None and mod_util > .7) or (mod_util is None and static_median_util > .7):
+        return "UNSUPPORTED_FOR_BBD", "p99_exceeds_engineering_70_percent_budget_on_this_machine"
+    if mod_util is None or sr > 96000:
+        return "EXPERIMENTAL", "no_complete_repeated_production_modulation_evidence_or_high_rate_policy"
+    if miss_runs >= 2:
+        return "EXPERIMENTAL", "repeated_runs_with_misses_require_scheduler_vs_load_review"
+    return "SUPPORTED_WITH_REDUCED_BBD_RANGE", "repeated_production_modulated_budget_pass_with_static_floor_and_tail_evidence"
+
+
+# Synthetic policy cases gate classification consistency, never hosted CPU values.
+assert classify_support(48000, False, 9, 9, 5)[0] == "EXPERIMENTAL"
+assert classify_support(48000, True, .3, .4, 0)[0] == "SUPPORTED_WITH_REDUCED_BBD_RANGE"
+assert classify_support(48000, True, .3, .8, 0)[0] == "UNSUPPORTED_FOR_BBD"
+assert classify_support(48000, True, .3, .4, 2)[0] == "EXPERIMENTAL"
+assert classify_support(192000, True, .3, None, 0)[0] == "EXPERIMENTAL"
+assert classify_support(32000, True, .3, .4, 0)[0] == "UNSUPPORTED_FOR_BBD"
+
 support, recommendation = [], []
 for floor in floors:
     name, sr = floor["candidate"], floor["sample_rate"]
@@ -70,14 +95,7 @@ for floor in floors:
     mod_util = float(mod["worst_p99_utilization"]) if mod else None
     long_run = int(selected["runs"]) >= 5 and int(selected["callbacks_per_run"]) >= 10000
     static_median_util = float(selected["median_p99"]) / (64/float(sr))
-    if (mod_util is not None and mod_util > .7) or (mod_util is None and static_median_util > .7):
-        classification, reason = "UNSUPPORTED_FOR_BBD", "p99_exceeds_engineering_70_percent_budget_on_this_machine"
-    elif not long_run or mod is None or float(sr) > 96000:
-        classification, reason = "EXPERIMENTAL", "no_complete_repeated_production_modulation_evidence_or_high_rate_policy"
-    elif int(mod["runs_with_misses"]) >= 2:
-        classification, reason = "EXPERIMENTAL", "repeated_runs_with_misses_require_scheduler_vs_load_review"
-    else:
-        classification, reason = "SUPPORTED_WITH_REDUCED_BBD_RANGE", "repeated_production_modulated_budget_pass_with_static_floor_and_tail_evidence"
+    classification, reason = classify_support(float(sr), long_run, static_median_util, mod_util, int(mod["runs_with_misses"]) if mod else 0)
     support.append(dict(candidate=name, sample_rate=sr, classification=classification,
                         static_worst_p99_utilization=static_util,
                         static_median_p99_utilization=static_median_util,
@@ -90,6 +108,8 @@ for floor in floors:
                                reason=reason, shipping_default="NO"))
 write("bbd_product_sample_rate_support.csv", support)
 write("bbd_product_recommendation.csv", recommendation)
+assert {r["classification"] for r in support} <= {"SUPPORTED", "SUPPORTED_WITH_REDUCED_BBD_RANGE", "EXPERIMENTAL", "UNSUPPORTED_FOR_BBD"}
+assert len({(r["candidate"], r["sample_rate"]) for r in support}) == 24
 
 # Clock ceilings are admitted hypotheses only where actual repeated evidence passes.
 ceilings = rows("bbd_product_clock_ceiling.csv")

@@ -62,29 +62,31 @@ ProductQuality productQuality(double sr, const BBDProductEnvelope &c,
   return q;
 }
 void productQualityReports(const std::filesystem::path &root, bool local) {
-  auto trade = file(
+  auto trade = productFile(
       root, "bbd_product_stage_tradeoff.csv",
       "candidate,stages,sample_rate,delay_seconds,frequency_hz,gain_db,thd_h2_"
       "h5,paired_noise_snr_db,internal_peak,nominal_fraction,scope");
-  auto startup = file(root, "bbd_product_startup_headroom.csv",
-                      "candidate,sample_rate,gain_profile,silence_seconds,"
-                      "stimulus,delay_seconds,summed_wet_peak_per_channel,post_"
-                      "mix_peak,per_voice_internal_peak,nonlinear_input_peak,"
-                      "nominal_fraction,headroom_db,finite,clamps,allocations");
-  auto gains =
-      file(root, "bbd_product_gain_profile.csv",
-           "candidate,sample_rate,gain_profile,frequency_hz,gain_db,thd_h2_h5,"
-           "paired_noise_snr_db,internal_peak,nominal_fraction");
-  auto feedback = file(
+  auto startup =
+      productFile(root, "bbd_product_startup_headroom.csv",
+                  "candidate,sample_rate,gain_profile,silence_seconds,"
+                  "stimulus,delay_seconds,summed_wet_peak_per_channel,post_"
+                  "mix_peak,per_voice_internal_peak,nonlinear_input_peak,"
+                  "nominal_fraction,headroom_db,finite,clamps,allocations");
+  auto gains = productFile(
+      root, "bbd_product_gain_profile.csv",
+      "candidate,sample_rate,gain_profile,frequency_hz,gain_db,thd_h2_h5,"
+      "paired_noise_snr_db,internal_peak,nominal_fraction");
+  auto feedback = productFile(
       root, "bbd_product_feedback_dc.csv",
       "candidate,sample_rate,feedback,duration_seconds,voice,loop_return_dc,"
       "loop_return_rms,bucket_mean,compressor_level,expander_level,output_dc,"
       "output_peak,nominal_fraction,internal_peak,headroom_db,early_decay_rms,"
       "late_decay_rms,thd_h2_h5,finite,clamps,allocations");
-  auto frontier = file(root, "bbd_product_quality_cpu_frontier.csv",
-                       "candidate,stages,sample_rate,min_delay_seconds,max_"
-                       "clock_hz,p99_utilization_128,gain500_db,snr_db,thd_h2_"
-                       "h5,startup_peak,feedback_return_dc,scope");
+  auto frontier =
+      productFile(root, "bbd_product_quality_cpu_frontier.csv",
+                  "candidate,stages,sample_rate,min_delay_seconds,max_"
+                  "clock_hz,p99_utilization_128,gain500_db,snr_db,thd_h2_"
+                  "h5,startup_peak,feedback_return_dc,scope");
   for (auto c : candidates)
     for (double sr : rates) {
       if (!productCandidateFilter.empty() && productCandidateFilter != c.name)
@@ -242,7 +244,7 @@ void productQualityReports(const std::filesystem::path &root, bool local) {
     }
 }
 void productFeedbackExperiment(const std::filesystem::path &root, bool local) {
-  auto f = file(
+  auto f = productFile(
       root, "bbd_product_feedback_dc_experiment.csv",
       "candidate,sample_rate,pole_hz,feedback,duration_seconds,loop_return_dc,"
       "bucket_mean,output_dc,peak,early_decay_rms,late_decay_rms,frequency_hz,"
@@ -304,12 +306,12 @@ void productFeedbackExperiment(const std::filesystem::path &root, bool local) {
       }
 }
 void productCosts(const std::filesystem::path &root, bool local) {
-  auto f = file(root, "bbd_product_cost_decomposition.csv",
-                "candidate,sample_rate,layer,paths,callback_p99_seconds,"
-                "percent_full_engine,incremental_p99_seconds,scope");
+  auto f = productFile(root, "bbd_product_cost_decomposition.csv",
+                       "candidate,sample_rate,layer,paths,callback_p99_seconds,"
+                       "percent_full_engine,incremental_p99_seconds,scope");
   auto architecture =
-      file(root, "bbd_product_voice_architecture.csv",
-           "candidate,sample_rate,independent_paths,p99_seconds,status");
+      productFile(root, "bbd_product_voice_architecture.csv",
+                  "candidate,sample_rate,independent_paths,p99_seconds,status");
   for (auto c : candidates)
     for (double sr : {48000., 96000.}) {
       auto full =
@@ -366,5 +368,6 @@ void productCosts(const std::filesystem::path &root, bool local) {
                    << ",INDEPENDENT_PATHS_MEASURED_SHARED_COMPONENTS_NOT_"
                       "MATHEMATICALLY_JUSTIFIED\n";
       f.flush();
+      architecture.flush();
     }
 }

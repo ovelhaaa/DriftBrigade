@@ -7,6 +7,13 @@
 #include <iomanip>
 namespace {
 std::string productCandidateFilter;
+std::ofstream productFile(const std::filesystem::path &root,
+                          const std::string &name, const char *header) {
+  auto stream = file(root, name, header);
+  stream.flush(); // Catch buffered /dev/full and other write failures before
+                  // measuring.
+  return stream;
+}
 struct BBDProductEnvelope {
   const char *name;
   std::size_t stages;
@@ -146,19 +153,11 @@ void productCoverage(std::ofstream &coverage, const BBDProductEnvelope &c,
   const double bound =
       DriftEngine::combinedModulationBound(OrganicVariant::Wander);
   int full = 0, reduced = 0, admitted = 0, total = 0;
-  for (int motion = 0; motion <= 10; ++motion)
-    for (int depth = 0; depth <= 10; ++depth)
-      for (int center = 0; center <= 10; ++center) {
-        double m =
-            parameterSpecs[Motion].minimum +
-            (parameterSpecs[Motion].maximum - parameterSpecs[Motion].minimum) *
-                motion / 10;
-        double d =
-            parameterSpecs[Center].minimum +
-            (parameterSpecs[Center].maximum - parameterSpecs[Center].minimum) *
-                center / 10;
+  for (double m : {.05, .2, .7, 2., 6., 10.})
+    for (double depth : {0., .25, .5, .75, 1.})
+      for (double d : {.3, .5, 1., 2., 5., 10., 20., 30.}) {
         double excursion = std::max(
-            0., std::min(depthSeconds(m, depth / 10.),
+            0., std::min(depthSeconds(m, depth),
                          (d * .001 - c.stages / (sr * 128)) * .85 / bound));
         ++total;
         if (d * .001 < c.floor(sr))
@@ -181,12 +180,13 @@ void productCoverage(std::ofstream &coverage, const BBDProductEnvelope &c,
                << 100. * admitted / total << ',' << c.floor(sr) * 1000 << ','
                << m << ',' << center << ',' << maxDepth << '\n';
     }
+  coverage.flush();
 }
 void productReports(const std::filesystem::path &root, bool local) {
   std::filesystem::create_directories(root);
   auto readme =
-      file(root, "README.txt",
-           "ENGINEERING PRODUCT ENVELOPE / NOT FINAL SHIPPING DEFAULT");
+      productFile(root, "README.txt",
+                  "ENGINEERING PRODUCT ENVELOPE / NOT FINAL SHIPPING DEFAULT");
   readme
       << "Scope: " << (local ? "LOCAL_RELEASE" : "CI_SHORT")
       << "\nCompiler: " << DRIFT_PRODUCT_COMPILER << "\nBuilt: " << __DATE__
@@ -196,40 +196,43 @@ void productReports(const std::filesystem::path &root, bool local) {
       << "Seed 77. Eight voices. Timing never gates CI. 50% p99 target; 70% "
          "tight threshold. Support classification remains provisional until "
          "repeated local trials.\n";
-  auto profiles =
-      file(root, "bbd_product_candidate_profiles.csv",
-           "candidate,stages,max_clock_hz,max_edges_per_sample,target_p99_"
-           "utilization,tight_p99_utilization,minimum_qualification_block,"
-           "headroom,compander,feedback_policy");
-  auto floors =
-      file(root, "bbd_product_delay_floor.csv",
-           "candidate,sample_rate,stages,product_min_delay_seconds,product_max_"
-           "clock_hz,max_edges_per_sample,model_min_delay_seconds");
-  auto ceilings = file(
+  readme.flush();
+  auto profiles = productFile(
+      root, "bbd_product_candidate_profiles.csv",
+      "candidate,stages,max_clock_hz,max_edges_per_sample,target_p99_"
+      "utilization,tight_p99_utilization,minimum_qualification_block,"
+      "headroom,compander,feedback_policy");
+  auto floors = productFile(
+      root, "bbd_product_delay_floor.csv",
+      "candidate,sample_rate,stages,product_min_delay_seconds,product_max_"
+      "clock_hz,max_edges_per_sample,model_min_delay_seconds");
+  auto ceilings = productFile(
       root, "bbd_product_clock_ceiling.csv",
       "candidate,sample_rate,clock_hz,edges_per_sample,model_clock_hz,status");
-  auto coverage =
-      file(root, "bbd_product_parameter_coverage.csv",
-           "candidate,sample_rate,grid_points,fully_reproducible_percent,"
-           "excursion_reduction_percent,center_admission_percent,minimum_"
-           "center_ms,motion,center_ms,max_effective_depth");
-  auto support = file(root, "bbd_product_sample_rate_support.csv",
-                      "candidate,sample_rate,classification,block64_worst_p99_"
-                      "utilization,block64_total_misses,reason");
-  auto timingFile =
-      file(root, "bbd_product_repeated_timing.csv",
-           "candidate,sample_rate,block,runs,callbacks_per_run,median_p99,"
-           "worst_p99,median_p999,worst_p999,total_misses,runs_with_misses,"
-           "worst_p99_utilization,tiny_block_risk");
-  auto raw = file(root, "bbd_product_raw_timing.csv",
-                  "candidate,sample_rate,stages,delay_seconds,block,run,"
-                  "callback,seconds,deadline_seconds");
-  auto events = file(root, "bbd_product_event_budget.csv",
-                     "sample_rate,stages,target_edges_per_sample,delay_seconds,"
-                     "clock_hz,actual_edges_per_sample,total_events_per_second,"
-                     "p50,p95,p99,p999,max,p99_utilization,misses,callbacks");
-  auto recommendation = file(root, "bbd_product_recommendation.csv",
-                             "candidate,sample_rate,status,reason");
+  auto coverage = productFile(
+      root, "bbd_product_parameter_coverage.csv",
+      "candidate,sample_rate,grid_points,fully_reproducible_percent,"
+      "excursion_reduction_percent,center_admission_percent,minimum_"
+      "center_ms,motion,center_ms,max_effective_depth");
+  auto support =
+      productFile(root, "bbd_product_sample_rate_support.csv",
+                  "candidate,sample_rate,classification,block64_worst_p99_"
+                  "utilization,block64_total_misses,reason");
+  auto timingFile = productFile(
+      root, "bbd_product_repeated_timing.csv",
+      "candidate,sample_rate,block,runs,callbacks_per_run,median_p99,"
+      "worst_p99,median_p999,worst_p999,total_misses,runs_with_misses,"
+      "worst_p99_utilization,tiny_block_risk");
+  auto raw = productFile(root, "bbd_product_raw_timing.csv",
+                         "candidate,sample_rate,stages,delay_seconds,block,run,"
+                         "callback,seconds,deadline_seconds");
+  auto events =
+      productFile(root, "bbd_product_event_budget.csv",
+                  "sample_rate,stages,target_edges_per_sample,delay_seconds,"
+                  "clock_hz,actual_edges_per_sample,total_events_per_second,"
+                  "p50,p95,p99,p999,max,p99_utilization,misses,callbacks");
+  auto recommendation = productFile(root, "bbd_product_recommendation.csv",
+                                    "candidate,sample_rate,status,reason");
   const int callbacks = local ? 10000 : 128, runs = local ? 5 : 1;
   for (auto c : candidates) {
     profiles << c.name << ',' << c.stages << ',' << c.clockCap << ','
@@ -307,6 +310,15 @@ void productReports(const std::filesystem::path &root, bool local) {
              << t.maximum << ',' << t.utilization << ',' << t.misses << ','
              << (local ? 2048 : 128) << '\n';
     }
+  profiles.flush();
+  floors.flush();
+  ceilings.flush();
+  coverage.flush();
+  support.flush();
+  timingFile.flush();
+  raw.flush();
+  events.flush();
+  recommendation.flush();
 }
 #ifdef DRIFT_BBD_INSTRUMENT
 #include "BBDProductQualityReports.inc"
@@ -332,7 +344,7 @@ int main(int argc, char **argv) {
       std::filesystem::create_directories(argv[1]);
       for (int i = 2; i < argc; ++i)
         if (std::string(argv[i]) == "--coverage-only") {
-          auto f = file(
+          auto f = productFile(
               argv[1], "bbd_product_parameter_coverage.csv",
               "candidate,sample_rate,grid_points,fully_reproducible_percent,"
               "excursion_reduction_percent,center_admission_percent,minimum_"
@@ -343,17 +355,17 @@ int main(int argc, char **argv) {
           return 0;
         }
       if (productionReference) {
-        auto f = file(argv[1],
-                      std::string("bbd_product_") + counterMode() +
-                          "_modulation.csv",
-                      "candidate,sample_rate,block,runs,callbacks_per_run,"
-                      "median_p99,worst_p99,median_p999,worst_p999,total_"
-                      "misses,runs_with_misses,worst_p99_utilization");
-        auto raw = file(argv[1],
-                        std::string("bbd_product_") + counterMode() +
-                            "_modulation_raw.csv",
-                        "candidate,sample_rate,stages,delay_seconds,block,run,"
-                        "callback,seconds,deadline_seconds");
+        auto f = productFile(
+            argv[1],
+            std::string("bbd_product_") + counterMode() + "_modulation.csv",
+            "candidate,sample_rate,block,runs,callbacks_per_run,"
+            "median_p99,worst_p99,median_p999,worst_p999,total_"
+            "misses,runs_with_misses,worst_p99_utilization");
+        auto raw = productFile(
+            argv[1],
+            std::string("bbd_product_") + counterMode() + "_modulation_raw.csv",
+            "candidate,sample_rate,stages,delay_seconds,block,run,"
+            "callback,seconds,deadline_seconds");
         for (auto c : candidates)
           for (double sr : {44100., 48000., 88200., 96000.})
             for (int block : (c.stages == 1024 ? std::vector<int>{64, 128}

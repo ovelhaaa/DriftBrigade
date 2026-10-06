@@ -50,7 +50,8 @@ timer. Each fresh engine gets 2048 warmup frames. Operating-statistic collection
 is disabled during timers; the instrumented build retains minimal numerical
 counters. A separate production-counter build removes those types/counters.
 Independent production modulation trials use five 10,000-callback runs per
-candidate at 44.1/48/88.2/96 kHz and block64. They place center at 1.2 times
+candidate at 44.1/48/88.2/96 kHz and block64, plus block128 for Balanced to
+investigate whether a larger deadline resolves small-block tail risk. They place center at 1.2 times
 the candidate floor and invert the current Depth mapping to keep the complete
 conservative modulation bound above that floor. Static clocks alone do not
 qualify continuously changing asynchronous transitions.
@@ -65,8 +66,8 @@ or build workloads. Cross-machine qualification remains a product blocker.
 
 ## Parameter coverage and stage tradeoff
 
-The coverage report uses 11 evenly spaced physical values each for Motion,
-Depth and Center (1331 points), default Wander's conservative magnitude bound,
+The coverage report reuses the existing M2.7 grid: Motion .05/.2/.7/2/6/10,
+Depth 0/.25/.5/.75/1 and Center .3/.5/1/2/5/10/20/30 ms (240 points), default Wander's conservative magnitude bound,
 and the existing perceptual mapping. Fractions are mutually exclusive: center
 below the product floor; additional excursion reduction relative to M2.8's
 already-admitted excursion; otherwise fully reproducible. This is a parameter
@@ -176,6 +177,10 @@ explicitly deferred. Production DSP and DigitalFractional source are unchanged.
 
 Build `drift_bbd_product_envelope_qualification` in Release and run it with an
 artifact directory and `--local --timing-only`, then `--local --quality-only`.
+Operating measurements can alternatively run with `--local --measurements-only
+--candidate=NAME` in independent candidate subdirectories. This mode performs
+no callback timing; merge those reports with the summary script and run
+`--local --cost-only` in the main artifact directory separately.
 Build `drift_bbd_product_envelope_production_timing` and run the same directory
 with `--production-reference`; its trials are always five by 10,000 callbacks.
 Run `--coverage-only` to regenerate coverage without altering timing files,
