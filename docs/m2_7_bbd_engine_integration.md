@@ -74,6 +74,27 @@ ctest --test-dir build --output-on-failure
 ./build/drift_bbd_engine_qualification output/DriftBrigade-M2.7-BBD-Engine-Qualification
 ```
 
+## Measured local qualification results
+
+**ENGINEERING INTEGRATION CHOICE / NOT PRODUCT DEFAULT:** Windows Release measurements on an AMD Ryzen 7 7730U, with the exact fixture above. These are finite observations, not calibration to a physical IC. The complete artifact has 15 CSVs plus README; Linux/macOS/Windows CI independently regenerates/gates the relevant results.
+
+- Digital regression: 12 changing-parameter bank/variant/mono configurations, 12,000 samples each, bit-identical to merged M2.6. Both backends: eight block sizes, exact reset replay, repeated prepare/state replay and zero callback allocations. All 18 DSP tests and the plugin state/routing test passed locally.
+- Delay admission: 4,800 onset cells; zero hidden scheduler clamps. Tracking: 18 variant/Motion cases, two cycles each; maximum clock formula error 0 Hz and maximum 9 edges per host sample. Nominal tracking delays span 2.4524–13.0226 ms; measured historical bucket residence spans 2.4500–13.0099 ms. Fixed Center with Depth=0 has constant clock.
+- Engine feedback: all 60 noise-on/off, feedback/stimulus cases remained finite with zero hidden clamps and zero numerical-guard activations. Maximum attained coefficient .722727 (DC burst); maximum summed-wet peak 1.05147, internal capture peak 1.60868 and minimum nominal occupancy .9999478. The DC burst exposes a pre-blocker loop DC of .17004 pooled across voices: the output DC blocker does not remove DC inside ExternalWetReturn. Its noise-off late/early output energy falls 65.06 dB in the measured windows; this does not prove unrestricted stability. Direct full-path voice feedback .75 also passes: maximum sine-burst output peak .78515 and internal peak .30967; no limiter or guard was activated.
+- Noise: identical band histories at Width=0 yield correlation 1 and maximum L/R difference 0. Maximum absolute cross-band correlation .02599 in the two silence matrices. Shared band seeds do not force equality when L/R clock histories diverge. Stereo grid Width=0 gives delay/clock/noise-only correlation 1 even though its program inputs deliberately differ; mono equality is separately tested with identical inputs. At Coherence=Width=1, measured delay/clock correlation is .16613/.14455, wet correlation −.06483. These values are fixture observations, not universal stereo targets.
+- Dynamics macro comparisons against digital have zero error at 0/.5/1. Actual wet output differs because the backend changes.
+- Fixed-delay multiband spectral result: BBD wet gain is .7623/.7597/.6038 at 100/500/3000 Hz in Gentle, versus approximately 1 in digital. Gentle H2–H5 THD is .738%/.151%/.116%; Selective is .276%/.0415%/.615%. Paired-noise SNR ranges 61.52–64.04 dB across these sine cases. Complex transfer/crossover/sweep measurements are in the artifact. No EQ compensation or bank winner was chosen.
+
+Actual eight-voice `process()` CPU, 512/1024/2048 stages, all five block sizes and both normal/heavy configurations:
+
+| Rate | CPU seconds per audio second, min–max | Median BBD/Digital ratio |
+| --- | --- | --- |
+| 44.1 kHz | .1744–.2397 | 16.71× |
+| 48 kHz | .1868–.3915 | 16.52× |
+| 96 kHz | .2660–.4606 | 13.24× |
+
+The 1024-stage, block-128 normal/heavy CPU factors are .2121/.2112 at 44.1, .3169/.2341 at 48 and .3560/.3620 at 96 kHz. Timing retains instrumentation clock counters, disables capture distributions/timestamps, and includes every audible DSP stage. Each case times only 250 ms at the default Center (8 ms), after 1024 warmup samples; host scheduling variance is visible. These measurements are not the maximum-clock short-delay worst case, a callback-deadline guarantee or a cross-platform performance claim. Profile sustained runs and short-delay corners before exposing BBD in the plugin.
+
 ## Remaining product decisions
 
 User-facing backend mode, plugin parameters/state, live switching/migration/crossfade, final stage count/headroom/gain/capacitor/feedback topology, feedback limiter, coupled continuous BBDTerminals solver, clock feedthrough/whine, IC/pedal calibration, UI/presets and subjective Digital/BBD or M1.1 variant/bank winner remain deferred. Next milestone should refine the measured operating envelope and startup/feedback behavior on target hardware before proposing any user-facing mode. Numerical finite fixtures and headroom occupancy do not establish an unrestricted circuit model or product-ready sound.
