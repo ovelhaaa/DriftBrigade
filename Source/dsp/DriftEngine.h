@@ -34,6 +34,11 @@ public:
     double minimumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? 4.0/sampleRate : double(bbdConfig.physicalStages)/(sampleRate*ClockedBBDCore::maximumEventsPerHostSample); }
     double maximumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? .055 : double(bbdConfig.physicalStages)/2; }
     const BBDModulatedDelayVoice& bbdVoice(std::size_t ch, std::size_t band) const noexcept { return bbdDelays[ch][band]; }
+#ifdef DRIFT_BBD_INSTRUMENT
+    void enableBBDOperatingInstrumentation(bool enabled) noexcept {
+        for(auto& ch:bbdDelays) for(auto& voice:ch) voice.enableOperatingInstrumentation(enabled);
+    }
+#endif
     void prepare(double sr, std::uint32_t seed = 0x44524946u);
     void reset(std::uint32_t seed = 0x44524946u) noexcept;
     void setParameters(const EngineParameters& p) noexcept;

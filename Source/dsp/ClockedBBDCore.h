@@ -50,10 +50,13 @@ public:
         std::uint64_t count=0, nominalCount=0, usefulCount=0;
         std::uint64_t bins[5]={};
         double aboveNominalSeconds=0, nonlinearInputPeak=0, nonlinearOutputPeak=0;
+        std::uint64_t transportedCount=0;
+        double minimumBucketResidence=std::numeric_limits<double>::max(), maximumBucketResidence=0;
         double peak=0, sumSquares=0, sumMagnitude=0, lastInput=0, lastNonlinearInput=0, lastNonlinearOutput=0;
     };
     InputOperatingStats operatingStats;
     bool collectOperatingStats=false;
+    std::vector<double> captureTimes; // Measurement only; fixed in prepare.
     auto inputFilterState() const noexcept { return inputFilter.stateSnapshot(); }
     auto outputFilterState() const noexcept { return outputFilter.stateSnapshot(); }
 #endif

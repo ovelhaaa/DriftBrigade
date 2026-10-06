@@ -47,7 +47,8 @@ public:
     character.seed = c.seed;
     path.core.setCharacterConfig(character);
     path.prepare(sr, c.physicalStages);
-    pole = std::exp(-2 * pi * 5 / sr);
+    rate = path.core.telemetry().hostRateWasNormalized ? 48000 : sr;
+    pole = std::exp(-2 * pi * 5 / rate);
     reset(c.seed);
   }
   void reset(std::uint32_t seed) noexcept {
@@ -86,6 +87,7 @@ public:
     return double(config.physicalStages) / 2;
   }
   const BBDFullPath &signalPath() const noexcept { return path; }
+  double feedbackWet() const noexcept { return previousWet; }
   bool finiteState() const noexcept {
     return path.core.finiteState() && std::isfinite(previousWet) &&
            std::isfinite(dcState) &&
@@ -93,6 +95,7 @@ public:
            std::isfinite(path.expander.currentGain());
   }
 #ifdef DRIFT_BBD_INSTRUMENT
+  void enableOperatingInstrumentation(bool enabled) noexcept { path.core.collectOperatingStats=enabled; }
   std::uint64_t hiddenClamps = 0, numericalGuards = 0;
 #endif
 private:

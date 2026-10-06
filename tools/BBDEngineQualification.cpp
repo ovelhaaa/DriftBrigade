@@ -18,10 +18,10 @@ constexpr double rates[] = {44100, 48000, 88200, 96000, 192000};
 constexpr std::size_t stages[] = {512, 1024, 2048, 4096};
 constexpr std::size_t blocks[] = {1, 17, 32, 64, 127, 256, 511, 1024};
 const char *variants[] = {"Wander", "PaperNarrowband", "PhaseDrift"};
-const char *stimuli[] = {"impulse",    "sine100", "sine500",
-                         "sine3000",   "white",   "percussive",
-                         "harmonic",   "program", "strong_transient",
-                         "sine_burst", "silence", "log_sweep"};
+const char *stimuli[] = {
+    "impulse",    "sine100",   "sine500", "sine3000",         "white",
+    "percussive", "harmonic",  "program", "strong_transient", "sine_burst",
+    "silence",    "log_sweep", "dc_burst"};
 double signal(int kind, int n, double sr) {
   double t = n / sr;
   std::uint32_t x = std::uint32_t(n) + 1;
@@ -58,6 +58,8 @@ double signal(int kind, int n, double sr) {
     double duration = 2, lo = 20, hi = 20000, k = std::log(hi / lo) / duration;
     return .2 * std::sin(2 * pi * lo * (std::exp(k * t) - 1) / k);
   }
+  case 12:
+    return t < 1 ? 1 : 0;
   default:
     return 0;
   }
@@ -90,7 +92,11 @@ struct Corr {
   }
 };
 struct Observation {
+  double maximumEffectiveFeedback = 0;
+  double residenceMin = 1e10, residenceMax = 0;
+  std::uint64_t transported = 0;
   Meter out[2], bandIn[4], bandOut[4], early, late;
+  Meter loopReturn;
   Corr stereo, delays, clocks;
   std::array<std::complex<double>, 5> harmonics{};
   double delayMin = 1e10, delayMax = 0, clockMin = 1e10, clockMax = 0,
@@ -110,6 +116,8 @@ struct Observation {
     for (int k = 0; k < 5; ++k)
       harmonics[k] += y[0] * std::polar(1., -2 * pi * 500 * (k + 1) * n / sr);
     const auto &t = e.telemetry();
+    maximumEffectiveFeedback =
+        std::max(maximumEffectiveFeedback, t.effectiveFeedback);
     for (int b = 0; b < 4; ++b) {
       bandIn[b].add(t.bandInput[0][b]);
       bandOut[b].add(t.bandWet[0][b]);
@@ -119,6 +127,7 @@ struct Observation {
       clocks.add(l.effectiveClockHz, r.effectiveClockHz);
       for (int ch = 0; ch < 2; ++ch) {
         const auto &v = e.bbdVoice(ch, b);
+        loopReturn.add(v.feedbackWet());
         const auto &c = v.signalPath().core.telemetry();
         require(v.finiteState(), "BBD finite state");
         delayMin = std::min(delayMin, c.effectiveDelaySeconds);
@@ -145,9 +154,17 @@ struct Observation {
   void finish(const DriftEngine &e) {
     for (int ch = 0; ch < 2; ++ch)
       for (int b = 0; b < 4; ++b) {
+        const auto &stats = e.bbdVoice(ch, b).signalPath().core.operatingStats;
+        transported += stats.transportedCount;
+        if (stats.transportedCount) {
+          residenceMin = std::min(residenceMin, stats.minimumBucketResidence);
+          residenceMax = std::max(residenceMax, stats.maximumBucketResidence);
+        }
         hidden += e.bbdVoice(ch, b).hiddenClamps;
         guards += e.bbdVoice(ch, b).numericalGuards;
       }
+    if (!transported)
+      residenceMin = residenceMax = std::numeric_limits<double>::quiet_NaN();
     require(hidden == 0 && guards == 0, "hidden clamp or numerical guard");
   }
 };
@@ -264,14 +281,21 @@ void invariance(std::ostream *report = nullptr) {
           referenceL = l;
           referenceR = r;
         } else {
-          require(l == referenceL && r == referenceR, "block bit identity");
+          require(std::memcmp(l.data(), referenceL.data(),
+                              l.size() * sizeof(float)) == 0 &&
+                      std::memcmp(r.data(), referenceR.data(),
+                                  r.size() * sizeof(float)) == 0,
+                  "block bit identity");
         }
         e.reset(77);
         for (int n = 0; n < 8192; ++n) {
           auto y = e.processSample(float(signal(7, n, 48000)),
                                    float(signal(4, n, 48000)), mono);
-          require(float(y[0]) == l[n] && (mono || float(y[1]) == r[n]),
-                  "reset bit identity");
+          const float sample[] = {float(y[0]), float(y[1])};
+          require(
+              std::memcmp(sample, &l[n], sizeof(float)) == 0 &&
+                  (mono || std::memcmp(sample + 1, &r[n], sizeof(float)) == 0),
+              "reset bit identity");
         }
         if (report)
           *report << int(backend) << ',' << mono << ',' << block
@@ -282,6 +306,54 @@ void invariance(std::ostream *report = nullptr) {
 void tests() {
   regression();
   invariance();
+  {
+    DriftEngine e;
+    EngineParameters p;
+    configure(e, DelayBackend::ExperimentalBBD, p, 48000);
+    std::array<std::array<double, 2>, 512> expected;
+    for (int n = 0; n < 512; ++n)
+      expected[n] = e.processSample(signal(7, n, 48000), signal(4, n, 48000));
+    std::array<std::array<std::complex<double>, 5>, 8> inState, outState;
+    std::array<double, 8> detector, held;
+    std::array<std::array<double, 512>, 8> buckets;
+    for (int i = 0; i < 8; ++i) {
+      const auto &path = e.bbdVoice(i / 4, i % 4).signalPath();
+      inState[i] = path.core.inputFilterState();
+      outState[i] = path.core.outputFilterState();
+      detector[i] = path.compressor.currentGain();
+      held[i] = path.core.heldOutput();
+      for (int b = 0; b < 512; ++b)
+        buckets[i][b] = path.core.stageValue(b);
+    }
+    e.prepare(48000, 77);
+    const auto before = allocations.load();
+    for (int n = 0; n < 512; ++n)
+      require(e.processSample(signal(7, n, 48000), signal(4, n, 48000)) ==
+                  expected[n],
+              "reprepare output identity");
+    require(before == allocations.load(), "reprepare callback allocations");
+    for (int i = 0; i < 8; ++i) {
+      const auto &path = e.bbdVoice(i / 4, i % 4).signalPath();
+      require(inState[i] == path.core.inputFilterState() &&
+                  outState[i] == path.core.outputFilterState() &&
+                  detector[i] == path.compressor.currentGain() &&
+                  held[i] == path.core.heldOutput(),
+              "reprepare filter/detector/hold state");
+      for (int b = 0; b < 512; ++b)
+        require(buckets[i][b] == path.core.stageValue(b), "reprepare buckets");
+    }
+    e.reset(78);
+    bool different = false;
+    for (int n = 0; n < 512; ++n)
+      different |= e.processSample(signal(7, n, 48000), signal(4, n, 48000)) !=
+                   expected[n];
+    require(different, "different reset seed changes histories");
+    e.reset(77);
+    for (int n = 0; n < 512; ++n)
+      require(e.processSample(signal(7, n, 48000), signal(4, n, 48000)) ==
+                  expected[n],
+              "restored seed output identity");
+  }
   for (double sr : rates)
     for (auto count : stages)
       for (int variant = 0; variant < 3; ++variant) {
@@ -349,9 +421,28 @@ void tests() {
         require(c == clock, "Depth zero clock constant");
       clock = c;
     }
+    const auto &stats = e.bbdVoice(0, 0).signalPath().core.operatingStats;
+    const double residence = 1023. / (2 * clock);
+    require(stats.transportedCount > 0 &&
+                std::abs(stats.minimumBucketResidence - residence) < 1e-11 &&
+                std::abs(stats.maximumBucketResidence - residence) < 1e-11,
+            "fixed clock bucket residence");
+  }
+  {
+    DriftEngine measured, plain;
+    EngineParameters p;
+    configure(measured, DelayBackend::ExperimentalBBD, p, 48000);
+    configure(plain, DelayBackend::ExperimentalBBD, p, 48000);
+    plain.enableBBDOperatingInstrumentation(false);
+    for (int n = 0; n < 2048; ++n) {
+      auto a = measured.processSample(signal(7, n, 48000), signal(4, n, 48000));
+      auto b = plain.processSample(signal(7, n, 48000), signal(4, n, 48000));
+      require(std::memcmp(a.data(), b.data(), sizeof(a)) == 0,
+              "instrumentation audio identity");
+    }
   }
   for (double feedback : {0., .25, .5, .65, .75})
-    for (int stimulus : {0, 7, 8, 9}) {
+    for (int stimulus : {0, 7, 8, 9, 12}) {
       DriftEngine e;
       EngineParameters p;
       p[Feedback] = std::min(.65, feedback);
@@ -484,6 +575,155 @@ void spectral(const std::filesystem::path &root) {
              << v.hiddenClamps << ',' << v.numericalGuards << '\n';
   }
 }
+void stageFeasibility(const std::filesystem::path &root) {
+  auto f = file(
+      root, "bbd_engine_stage_feasibility.csv",
+      "rate,stages,min_delay_ms,max_core_delay_s,min_center_ms,"
+      "requested_events_at_min_center,status,unrestricted_request_status,all_"
+      "centers_supported,pre_m27_conservative_trajectory_min_ms,events_at_"
+      "pre_m27_envelope_min");
+  for (double sr : rates)
+    for (auto count : stages) {
+      double min = double(count) / (sr * 128);
+      // Right modulation has three nonnegative coefficients whose squared
+      // sum is one. Cauchy-Schwarz bounds their sum by sqrt(3), tighter than
+      // the engine's deliberately conservative 2*source magnitude bound.
+      const double preMinimum =
+          .0003 - .85 * (.0003 - 4 / sr) * std::sqrt(3.) / 2;
+      f << sr << ',' << count << ',' << min * 1000 << ',' << count / 2.
+        << ",0.3," << count / (sr * .0003) << ','
+        << (min <= preMinimum ? "FULL_RANGE" : "LIMITED_SHORT_DELAY") << ','
+        << (min <= preMinimum ? "FULL_RANGE" : "EVENT_LIMIT_EXCEEDED") << ','
+        << (min <= .0003) << ',' << preMinimum * 1000 << ','
+        << count / (sr * preMinimum) << '\n';
+    }
+}
+void benchmark(const std::filesystem::path &root) {
+  auto f = file(root, "bbd_engine_cpu.csv",
+                "rate,stages,block,heavy,backend,seconds_per_audio_second,"
+                "realtime_factor,max_events,total_events_per_second,clock_"
+                "average,clock_min,clock_max,ratio_vs_digital");
+  for (double sr : {44100., 48000., 96000.})
+    for (auto count : {512u, 1024u, 2048u})
+      for (int block : {32, 64, 128, 256, 512})
+        for (bool heavy : {false, true}) {
+          double digitalTime = 0;
+          for (auto backend : {DelayBackend::DigitalFractional,
+                               DelayBackend::ExperimentalBBD}) {
+            EngineParameters p;
+            if (heavy) {
+              p[Depth] = 1;
+              p[Motion] = 10;
+              p[Chaos] = 1;
+              p[Feedback] = .65;
+              p[Dynamics] = 1;
+            }
+            DriftEngine e;
+            configure(e, backend, p, sr, count);
+            e.enableBBDOperatingInstrumentation(false);
+            std::vector<float> l(block), r(block);
+            int total = int(sr * .25), done = 0;
+            std::uint64_t events = 0;
+            std::uint32_t maxEvents = 0;
+            double clockSum = 0, clockMin = 1e10, clockMax = 0;
+            for (int n = 0; n < 1024; ++n)
+              e.processSample(signal(7, n, sr), signal(4, n, sr));
+            double seconds = 0;
+            while (done < total) {
+              int size = std::min(block, total - done);
+              for (int n = 0; n < size; ++n) {
+                l[n] = float(signal(7, done + n, sr));
+                r[n] = float(signal(4, done + n, sr));
+              }
+              float *channels[] = {l.data(), r.data()};
+              auto start = std::chrono::steady_clock::now();
+              e.process(channels, 2, size);
+              seconds += std::chrono::duration<double>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+              done += size;
+              if (backend == DelayBackend::ExperimentalBBD)
+                for (int ch = 0; ch < 2; ++ch)
+                  for (int b = 0; b < 4; ++b) {
+                    auto &t = e.bbdVoice(ch, b).signalPath().core.telemetry();
+                    maxEvents = std::max(maxEvents, t.eventsThisHostSample);
+                    clockSum += t.effectiveClockHz * size;
+                    clockMin = std::min(clockMin, t.effectiveClockHz);
+                    clockMax = std::max(clockMax, t.effectiveClockHz);
+                  }
+            }
+            if (backend == DelayBackend::ExperimentalBBD)
+              for (int ch = 0; ch < 2; ++ch)
+                for (int b = 0; b < 4; ++b)
+                  events += e.bbdVoice(ch, b)
+                                .signalPath()
+                                .core.telemetry()
+                                .totalEventCount;
+            if (backend == DelayBackend::ExperimentalBBD) {
+              const auto &t = e.telemetry();
+              maxEvents = t.maximumBBDEventsPerSample;
+              clockMin = t.minimumBBDClock;
+              clockMax = t.maximumBBDClock;
+              clockSum = t.accumulatedBBDClock * total / (total + 1024);
+            }
+            double factor = seconds / (total / sr);
+            if (backend == DelayBackend::DigitalFractional)
+              digitalTime = factor;
+            f << sr << ',' << count << ',' << block << ',' << heavy << ','
+              << int(backend) << ',' << factor << ',' << 1 / factor << ','
+              << maxEvents << ',' << events / ((total + 1024) / sr) << ','
+              << clockSum / (8 * total) << ','
+              << (backend == DelayBackend::ExperimentalBBD ? clockMin : 0)
+              << ',' << clockMax << ',' << factor / digitalTime << '\n';
+          }
+        }
+}
+void feedbackQualification(const std::filesystem::path &root) {
+  auto f = file(root, "bbd_engine_feedback.csv",
+                "requested_effective_feedback,stimulus,peak,rms,dc,early_rms,"
+                "late_rms,late_early_db,h2,h3,h4,h5,internal_peak,min_"
+                "occupancy,compressor_detector,expander_detector,observed_"
+                "effective_feedback,hidden_clamps,numerical_guards,finite,"
+                "noise_enabled,maximum_effective_feedback,per_voice_loop_peak,"
+                "pooled_voice_loop_rms,pooled_voice_loop_dc");
+  for (bool noiseEnabled : {false, true})
+    for (double fb : {0., .25, .5, .65, .75})
+      for (int kind : {0, 7, 8, 9, 10, 12}) {
+        DriftEngine e;
+        EngineParameters p;
+        p[Feedback] = std::min(.65, fb);
+        p[Dynamics] = fb == .75 ? 1 : 0;
+        p[Mix] = 1;
+        auto config = BBDVoiceConfig::fullResearchFixture();
+        if (!noiseEnabled)
+          config.character.inputNoiseRms = config.character.outputNoiseRms = 0;
+        configure(e, DelayBackend::ExperimentalBBD, p, 48000, 1024, 0,
+                  BankMode::Gentle, config);
+        auto o = render(e, 48000, kind, 96000, true);
+        double peak = 0, occupancy = 1;
+        for (int b = 0; b < 4; ++b) {
+          const auto &s = e.bbdVoice(0, b).signalPath().core.operatingStats;
+          peak = std::max(peak, s.peak);
+          if (s.count)
+            occupancy = std::min(occupancy, double(s.nominalCount) / s.count);
+        }
+        const auto &path = e.bbdVoice(0, 0).signalPath();
+        f << fb << ',' << stimuli[kind] << ',' << o.out[0].peak << ','
+          << o.out[0].rms() << ',' << o.out[0].dc() << ',' << o.early.rms()
+          << ',' << o.late.rms() << ','
+          << 20 * std::log10(std::max(1e-150, o.late.rms()) /
+                             std::max(1e-150, o.early.rms()));
+        for (int k = 1; k < 5; ++k)
+          f << ',' << 2 * std::abs(o.harmonics[k]) / o.host;
+        f << ',' << peak << ',' << occupancy << ','
+          << path.compressor.levelAverager().value() << ','
+          << path.expander.levelAverager().value() << ','
+          << e.telemetry().effectiveFeedback << ',' << o.hidden << ','
+          << o.guards << ",1," << noiseEnabled << ','
+          << o.maximumEffectiveFeedback << ',' << o.loopReturn.peak << ','
+          << o.loopReturn.rms() << ',' << o.loopReturn.dc() << '\n';
+      }
+}
 void qualification(const std::filesystem::path &root) {
   std::filesystem::create_directories(root);
   {
@@ -496,34 +736,15 @@ void qualification(const std::filesystem::path &root) {
                   "backend,mono,block,max_error,reset_error,result");
     invariance(&f);
   }
-  {
-    auto f = file(
-        root, "bbd_engine_stage_feasibility.csv",
-        "rate,stages,min_delay_ms,max_core_delay_s,min_center_ms,"
-        "requested_events_at_min_center,status,unrestricted_request_status,all_"
-        "centers_supported,pre_m27_conservative_trajectory_min_ms");
-    for (double sr : rates)
-      for (auto count : stages) {
-        double min = double(count) / (sr * 128);
-        // Right modulation has three nonnegative coefficients whose squared
-        // sum is one. Cauchy-Schwarz bounds their sum by sqrt(3), tighter than
-        // the engine's deliberately conservative 2*source magnitude bound.
-        const double preMinimum =
-            .0003 - .85 * (.0003 - 4 / sr) * std::sqrt(3.) / 2;
-        f << sr << ',' << count << ',' << min * 1000 << ',' << count / 2.
-          << ",0.3," << count / (sr * .0003) << ','
-          << (min <= preMinimum ? "FULL_RANGE" : "LIMITED_SHORT_DELAY") << ','
-          << (min <= preMinimum ? "FULL_RANGE" : "EVENT_LIMIT_EXCEEDED") << ','
-          << (min <= .0003) << ',' << preMinimum * 1000 << '\n';
-      }
-  }
+  stageFeasibility(root);
   {
     auto f = file(root, "bbd_engine_delay_range.csv",
                   "rate,stages,motion,depth,center_ms,requested_excursion_s,"
                   "limited_excursion_s,actual_min_s,actual_max_s,hidden_clamps,"
                   "clock_min,clock_max,max_events,events_per_second,limited_"
                   "sample_percent,observation_samples,pre_m27_excursion_s,"
-                  "extra_excursion_reduction_s");
+                  "extra_excursion_reduction_s,bucket_residence_min_s,bucket_"
+                  "residence_max_s,transported_count");
     for (double sr : rates)
       for (auto count : stages)
         for (double motion : {.05, .2, .7, 2., 6., 10.})
@@ -552,14 +773,16 @@ void qualification(const std::filesystem::path &root) {
                 << 100. * t.physicalLimitSamples / o.host << ',' << o.host
                 << ',' << originalExcursion << ','
                 << std::max(0., originalExcursion - t.actualExcursionSeconds)
-                << '\n';
+                << ',' << o.residenceMin << ',' << o.residenceMax << ','
+                << o.transported << '\n';
             }
   }
   {
     auto f = file(root, "bbd_engine_modulation_tracking.csv",
                   "variant,rate,stages,delay_min_s,delay_max_s,clock_min,clock_"
                   "max,max_events,tracking_error_hz,max_clock_derivative_hz_"
-                  "per_s,hidden_clamps,observation_s,motion_hz");
+                  "per_s,hidden_clamps,observation_s,motion_hz,bucket_"
+                  "residence_min_s,bucket_residence_max_s,transported_count");
     auto voices = file(
         root, "bbd_engine_voice_telemetry.csv",
         "variant,motion_hz,sample,channel,band,requested_delay_s,effective_"
@@ -579,53 +802,11 @@ void qualification(const std::filesystem::path &root) {
         f << variants[v] << ",48000,1024," << o.delayMin << ',' << o.delayMax
           << ',' << o.clockMin << ',' << o.clockMax << ',' << o.maxEvents << ','
           << o.trackingError << ',' << o.maxClockDerivative << ',' << o.hidden
-          << ',' << duration << ',' << motion << '\n';
+          << ',' << duration << ',' << motion << ',' << o.residenceMin << ','
+          << o.residenceMax << ',' << o.transported << '\n';
       }
   }
-  {
-    auto f = file(root, "bbd_engine_feedback.csv",
-                  "requested_effective_feedback,stimulus,peak,rms,dc,early_rms,"
-                  "late_rms,late_early_db,h2,h3,h4,h5,internal_peak,min_"
-                  "occupancy,compressor_detector,expander_detector,observed_"
-                  "effective_feedback,hidden_clamps,numerical_guards,finite,"
-                  "noise_enabled");
-    for (bool noiseEnabled : {false, true})
-      for (double fb : {0., .25, .5, .65, .75})
-        for (int kind : {0, 7, 8, 9, 10}) {
-          DriftEngine e;
-          EngineParameters p;
-          p[Feedback] = std::min(.65, fb);
-          p[Dynamics] = fb == .75 ? 1 : 0;
-          p[Mix] = 1;
-          auto config = BBDVoiceConfig::fullResearchFixture();
-          if (!noiseEnabled)
-            config.character.inputNoiseRms = config.character.outputNoiseRms =
-                0;
-          configure(e, DelayBackend::ExperimentalBBD, p, 48000, 1024, 0,
-                    BankMode::Gentle, config);
-          auto o = render(e, 48000, kind, 96000, true);
-          double peak = 0, occupancy = 1;
-          for (int b = 0; b < 4; ++b) {
-            const auto &s = e.bbdVoice(0, b).signalPath().core.operatingStats;
-            peak = std::max(peak, s.peak);
-            if (s.count)
-              occupancy = std::min(occupancy, double(s.nominalCount) / s.count);
-          }
-          const auto &path = e.bbdVoice(0, 0).signalPath();
-          f << fb << ',' << stimuli[kind] << ',' << o.out[0].peak << ','
-            << o.out[0].rms() << ',' << o.out[0].dc() << ',' << o.early.rms()
-            << ',' << o.late.rms() << ','
-            << 20 * std::log10(std::max(1e-150, o.late.rms()) /
-                               std::max(1e-150, o.early.rms()));
-          for (int k = 1; k < 5; ++k)
-            f << ',' << 2 * std::abs(o.harmonics[k]) / o.host;
-          f << ',' << peak << ',' << occupancy << ','
-            << path.compressor.levelAverager().value() << ','
-            << path.expander.levelAverager().value() << ','
-            << e.telemetry().effectiveFeedback << ',' << o.hidden << ','
-            << o.guards << ",1," << noiseEnabled << '\n';
-        }
-  }
+  feedbackQualification(root);
   {
     auto f = file(root, "bbd_engine_noise_correlation.csv",
                   "width,voice_a,voice_b,seed_a,seed_b,correlation,maximum_"
@@ -791,85 +972,7 @@ void qualification(const std::filesystem::path &root) {
           << std::sqrt(power) / std::max(1e-150, std::abs(h[0])) << ",.5\n";
       }
   }
-  {
-    auto f = file(root, "bbd_engine_cpu.csv",
-                  "rate,stages,block,heavy,backend,seconds_per_audio_second,"
-                  "realtime_factor,max_events,total_events_per_second,clock_"
-                  "average,clock_min,clock_max,ratio_vs_digital");
-    for (double sr : {44100., 48000., 96000.})
-      for (auto count : {512u, 1024u, 2048u})
-        for (int block : {32, 64, 128, 256, 512})
-          for (bool heavy : {false, true}) {
-            double digitalTime = 0;
-            for (auto backend : {DelayBackend::DigitalFractional,
-                                 DelayBackend::ExperimentalBBD}) {
-              EngineParameters p;
-              if (heavy) {
-                p[Depth] = 1;
-                p[Motion] = 10;
-                p[Chaos] = 1;
-                p[Feedback] = .65;
-                p[Dynamics] = 1;
-              }
-              DriftEngine e;
-              configure(e, backend, p, sr, count);
-              std::vector<float> l(block), r(block);
-              int total = int(sr * .25), done = 0;
-              std::uint64_t events = 0;
-              std::uint32_t maxEvents = 0;
-              double clockSum = 0, clockMin = 1e10, clockMax = 0;
-              for (int n = 0; n < 1024; ++n)
-                e.processSample(signal(7, n, sr), signal(4, n, sr));
-              double seconds = 0;
-              while (done < total) {
-                int size = std::min(block, total - done);
-                for (int n = 0; n < size; ++n) {
-                  l[n] = float(signal(7, done + n, sr));
-                  r[n] = float(signal(4, done + n, sr));
-                }
-                float *channels[] = {l.data(), r.data()};
-                auto start = std::chrono::steady_clock::now();
-                e.process(channels, 2, size);
-                seconds += std::chrono::duration<double>(
-                               std::chrono::steady_clock::now() - start)
-                               .count();
-                done += size;
-                if (backend == DelayBackend::ExperimentalBBD)
-                  for (int ch = 0; ch < 2; ++ch)
-                    for (int b = 0; b < 4; ++b) {
-                      auto &t = e.bbdVoice(ch, b).signalPath().core.telemetry();
-                      maxEvents = std::max(maxEvents, t.eventsThisHostSample);
-                      clockSum += t.effectiveClockHz * size;
-                      clockMin = std::min(clockMin, t.effectiveClockHz);
-                      clockMax = std::max(clockMax, t.effectiveClockHz);
-                    }
-              }
-              if (backend == DelayBackend::ExperimentalBBD)
-                for (int ch = 0; ch < 2; ++ch)
-                  for (int b = 0; b < 4; ++b)
-                    events += e.bbdVoice(ch, b)
-                                  .signalPath()
-                                  .core.telemetry()
-                                  .totalEventCount;
-              if (backend == DelayBackend::ExperimentalBBD) {
-                const auto &t = e.telemetry();
-                maxEvents = t.maximumBBDEventsPerSample;
-                clockMin = t.minimumBBDClock;
-                clockMax = t.maximumBBDClock;
-                clockSum = t.accumulatedBBDClock * total / (total + 1024);
-              }
-              double factor = seconds / (total / sr);
-              if (backend == DelayBackend::DigitalFractional)
-                digitalTime = factor;
-              f << sr << ',' << count << ',' << block << ',' << heavy << ','
-                << int(backend) << ',' << factor << ',' << 1 / factor << ','
-                << maxEvents << ',' << events / ((total + 1024) / sr) << ','
-                << clockSum / (8 * total) << ','
-                << (backend == DelayBackend::ExperimentalBBD ? clockMin : 0)
-                << ',' << clockMax << ',' << factor / digitalTime << '\n';
-            }
-          }
-  }
+  benchmark(root);
   {
     auto f =
         file(root, "README.txt", "DriftBrigade-M2.7-BBD-Engine-Qualification");
@@ -883,7 +986,12 @@ void qualification(const std::filesystem::path &root) {
          "XOR fixture seed,band, BBD tag); no channel index.\nRange grid "
          "observes 256 host samples per cell; it is an onset/range enforcement "
          "grid, not an extrema estimate across complete slow modulation "
-         "cycles. Analytic conservative modulation envelope limits are used by "
+         "cycles. Bucket residence uses actual capture/output timestamps; "
+         "nominal N/(2fclk) differs from physical residence under variable "
+         "clock and from full-path group delay. At fixed clock Eq.1 residence "
+         "is (N-1)/(2fclk). nan residence means no bucket has completed "
+         "transport. Analytic conservative modulation envelope limits are used "
+         "by "
          "the engine. Tracking observes at least two Motion cycles in every "
          "variant, minimum 2s (40s at .05Hz).\nFeedback H2-H5 "
          "are whole-run 500Hz projections, not stationary THD. Effective .75 "
@@ -896,7 +1004,8 @@ void qualification(const std::filesystem::path &root) {
          "measures clean H2-H5 THD and paired-noise RMS at fixed delay after "
          ".5s settling.\nCPU is 250ms audio plus "
          "1024-sample warmup, one timing observation per configuration, "
-         "instrumented engine; clock min/max and max events are per-sample "
+         "instrumented engine with operating distributions/timestamps "
+         "disabled; clock min/max and max events are per-sample "
          "aggregates including warmup; mean clock and event rate include "
          "warmup. Compare on target hardware; no wall-time CI "
          "gate.\nDigital-vs-BBD harmonic ratio only interpretable as THD for "
@@ -909,6 +1018,18 @@ int main(int argc, char **argv) {
   try {
     if (argc > 1 && std::string(argv[1]) != "--tests-only") {
       std::filesystem::create_directories(argv[1]);
+      if (argc > 2 && std::string(argv[2]) == "--cpu-only") {
+        benchmark(argv[1]);
+        return 0;
+      }
+      if (argc > 2 && std::string(argv[2]) == "--feedback-only") {
+        feedbackQualification(argv[1]);
+        return 0;
+      }
+      if (argc > 2 && std::string(argv[2]) == "--stage-only") {
+        stageFeasibility(argv[1]);
+        return 0;
+      }
       if (argc > 2 && std::string(argv[2]) == "--spectral-only") {
         spectral(argv[1]);
         return 0;
