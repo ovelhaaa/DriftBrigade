@@ -112,3 +112,13 @@ BBD terminal operating-point or supply-voltage calibration.
 **ENGINEERING INTEGRATION CHOICE / NOT PRODUCT DEFAULT:** internal pre-prepare BBD backend, 1024-stage Table1/.47uF/10kohm/full synthetic character/M2.4/M2.6 Nominal fixture, ExternalWetReturn before the output DC blocker and per-band seeds shared across L/R. Digital plugin routing and all macro equations stay unchanged. Engine admission uses actual physical minimum and preserves quarter-sample slew.
 
 Stage feasibility and actual eight-voice performance are measured, without selecting product stages or compensating the multiband/BBD transfer. The complete qualification grid is an onset admission check; long modulation tracking is separate. Feedback's .75 guard is not actually attained by current .65+.08 parameter formulas; the .75 direct voice gate is separate. Timing is host-specific and instrumented. See [M2.7 integration](m2_7_bbd_engine_integration.md). User-facing selection, final calibration, solver, topology and subjective winners remain deferred.
+# M2.8 qualification note
+
+The actual eight-voice engine now has a separate realtime stress harness covering
+the model's 128-edge boundary, callback distributions, feedback/DC evolution,
+startup, fault/reset recovery, automation and subnormal tails. These are
+ENGINEERING ROBUSTNESS and ENGINEERING PRODUCT CRITERIA, not new sound-design
+defaults. Noise-off/nonlinearity-off comparisons are labelled measurement
+fixtures. Minimum-delay high-rate deadline failures prevent an unrestricted BBD
+realtime claim. DigitalFractional remains production/default. See
+[M2.8 report](m2_8_bbd_realtime_hardening.md) for provenance and limits.

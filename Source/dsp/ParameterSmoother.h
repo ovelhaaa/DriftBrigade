@@ -8,7 +8,13 @@ public:
     void reset(double x) noexcept { current = target = x; }
     void setTarget(double x) noexcept { target = x; }
     double next() noexcept { current = target + coefficient * (current - target); return current; }
-    double value() const noexcept { return current; }
-private: double coefficient = 0, current = 0, target = 0;
+  void clearSubnormalState() noexcept { current = flushSubnormal(current); }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInjectTail(double value) noexcept { current = value; }
+#endif
+  double value() const noexcept { return current; }
+
+private:
+  double coefficient = 0, current = 0, target = 0;
 };
-}
+} // namespace drift

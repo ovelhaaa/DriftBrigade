@@ -1,5 +1,6 @@
 #pragma once
 #include "AsyncOperationCounts.h"
+#include "DspMath.h"
 #include <array>
 #include <cmath>
 #include <complex>
@@ -59,7 +60,21 @@ public:
   DRIFT_ASYNC_COUNT(arbitraryBuilds,1);
   return advanceWithTransition(makeTransition(seconds),heldInput);
  }
- double value() const noexcept {
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInjectTail(double value) noexcept {
+    real.state = value;
+    for (auto &p : pairs)
+      p.real = p.imag = value;
+  }
+#endif
+  void clearSubnormalState() noexcept {
+    real.state = flushSubnormal(real.state);
+    for (std::size_t i = 0; i < pairCount(); ++i) {
+      pairs[i].real = flushSubnormal(pairs[i].real);
+      pairs[i].imag = flushSubnormal(pairs[i].imag);
+    }
+  }
+  double value() const noexcept {
   double sum=real.state; for(std::size_t i=0;i<pairCount();++i) sum+=2*pairs[i].real; return sum;
  }
  Complex response(double hz) const noexcept {
@@ -94,4 +109,4 @@ private:
  RealPoleSection real;
  std::array<ConjugatePolePairSection,2> pairs{};
 };
-}
+} // namespace drift

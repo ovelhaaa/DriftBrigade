@@ -164,3 +164,32 @@ add_test(NAME bbd_engine_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
   -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-engine-stream-tests
   -DBLOCKED_ARTIFACT=bbd_engine_backend_regression.csv
   -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+
+# M2.8 short numerical stress and informational timing/long-run qualification.
+add_executable(drift_bbd_realtime_qualification tools/BBDRealtimeQualification.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_realtime_qualification PRIVATE Source)
+target_compile_definitions(drift_bbd_realtime_qualification PRIVATE DRIFT_BBD_INSTRUMENT=1 DRIFT_BBD_REALTIME_QUALIFY=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_realtime_qualification PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_realtime_qualification PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_realtime_qualification PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_realtime_numerical COMMAND drift_bbd_realtime_qualification --tests-only)
+add_test(NAME bbd_realtime_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_realtime_qualification>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-realtime-stream-tests
+  -DBLOCKED_ARTIFACT=README.txt
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+
+# Same engine/timing harness without operating-statistic types or qualification
+# aggregation in the hot path. Intrinsic production scheduler counters remain.
+add_executable(drift_bbd_realtime_production_timing tools/BBDRealtimeQualification.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_realtime_production_timing PRIVATE Source)
+target_compile_definitions(drift_bbd_realtime_production_timing PRIVATE DRIFT_BBD_REALTIME_QUALIFY=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_realtime_production_timing PRIVATE -femulated-tls)
+endif()

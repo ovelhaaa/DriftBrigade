@@ -66,6 +66,9 @@ public:
   }
   void setLevel(double value) noexcept { level = std::max(floor, value); }
   double value() const noexcept { return level; }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInject(double value) noexcept { level = value; }
+#endif
   double timeConstantSeconds() const noexcept { return tau; }
   double numericalFloor() const noexcept { return floor; }
 
@@ -103,6 +106,11 @@ public:
     return detector;
   }
   double currentGain() const noexcept { return gain; }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInjectDetector(double value) noexcept {
+    detector.qualificationInject(value);
+  }
+#endif
 
 private:
   CompanderLevelAverager detector;
@@ -124,6 +132,11 @@ public:
     return detector;
   }
   double currentGain() const noexcept { return detector.value(); }
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  void qualificationInjectDetector(double value) noexcept {
+    detector.qualificationInject(value);
+  }
+#endif
 
 private:
   CompanderLevelAverager detector;

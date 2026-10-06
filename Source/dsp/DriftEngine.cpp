@@ -5,7 +5,7 @@ namespace {
 constexpr std::array<double, 4> independentRates {0.91, 1.037, 1.083, 0.967};
 constexpr std::array<double, 4> stereoRates {1.113, 0.943, 1.057, 0.887};
 constexpr double dynamicsChaos = 0.20, dynamicsFeedback = 0.08, quietWetReduction = 0.55;
-}
+} // namespace
 void DriftEngine::setOrganicVariant(OrganicVariant value) noexcept {
     organicVariant=value; common.setVariant(value);
     for(auto& m: independent) m.setVariant(value);
@@ -15,7 +15,9 @@ void DriftEngine::setBankMode(BankMode value) noexcept {
     bankMode=value; for(auto& b:banks) b.setMode(value);
 }
 void DriftEngine::prepare(double sr, std::uint32_t seed) {
-    sampleRate = bounded(sr, 44100, 192000);
+  prepared = false; // Failed prepare cannot leave a partially initialized
+                    // engine active.
+  sampleRate = bounded(sr, 44100, 192000);
     for (auto& c : controls) c.prepare(sampleRate);
     for (auto& b : banks) b.prepare(sampleRate);
     if (backend == DelayBackend::DigitalFractional) {
@@ -43,7 +45,13 @@ void DriftEngine::reset(std::uint32_t seed) noexcept {
     }
     common.reset(seed);
     for (std::size_t b=0; b<4; ++b) { independent[b].reset(seed ^ (0x9e3779b9u*static_cast<std::uint32_t>(b+1))); stereo[b].reset(seed ^ (0x85ebca6bu*static_cast<std::uint32_t>(b+5))); }
-    for (auto& ch : currentDelays) ch.fill(targets[Center]*0.001);
+  double initialCenter = targets[Center] * 0.001;
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  if (backend == DelayBackend::ExperimentalBBD && qualificationCenter > 0)
+    initialCenter = qualificationCenter;
+#endif
+  for (auto &ch : currentDelays)
+    ch.fill(initialCenter);
     if (backend == DelayBackend::ExperimentalBBD) for (auto& ch : currentDelays)
         for (auto& d:ch) d=bounded(d,minimumDelaySeconds(),maximumDelaySeconds());
     envelope.reset(); envelopeControl.reset(0); trace = {};
@@ -56,10 +64,15 @@ void DriftEngine::setParameters(const EngineParameters& p) noexcept {
     }
 }
 std::array<double, 2> DriftEngine::processSample(double left, double right, bool mono) noexcept {
-    // Float-range finite inputs are kept in double for filter/control headroom.
-    constexpr double maximumFloat = std::numeric_limits<float>::max();
-    left = bounded(left, -maximumFloat, maximumFloat);
-    right = mono ? left : bounded(right, -maximumFloat, maximumFloat);
+  if (!prepared)
+    return {0.0, 0.0};
+  // Float-range finite inputs are kept in double for filter/control headroom.
+  constexpr double maximumFloat = std::numeric_limits<float>::max();
+  left = std::isfinite(left) ? bounded(left, -maximumFloat, maximumFloat) : 0.0;
+  right =
+      mono ? left
+           : (std::isfinite(right) ? bounded(right, -maximumFloat, maximumFloat)
+                                   : 0.0);
     std::array<double, Count> p {};
     for (std::size_t i=0; i<Count; ++i) p[i] = controls[i].next();
     trace.envelope = envelope.process(std::max(std::abs(left), std::abs(right)));
@@ -77,7 +90,15 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
     const double stereoWeight = std::sqrt(std::max(0.0, 1-stereoShared*stereoShared));
     const double minimumDelay = minimumDelaySeconds();
     const double maximumDelay = std::min(.055,maximumDelaySeconds());
-    const double center = backend == DelayBackend::DigitalFractional ? p[Center]*0.001 : bounded(p[Center]*0.001,minimumDelay,maximumDelay);
+  double requestedCenter = p[Center] * 0.001;
+#ifdef DRIFT_BBD_REALTIME_QUALIFY
+  if (backend == DelayBackend::ExperimentalBBD && qualificationCenter > 0)
+    requestedCenter = qualificationCenter;
+#endif
+  const double center =
+      backend == DelayBackend::DigitalFractional
+          ? requestedCenter
+          : bounded(requestedCenter,minimumDelay,maximumDelay);
     const double bound = combinedModulationBound(organicVariant);
     trace.requestedExcursionSeconds = depthSeconds(p[Motion], p[Depth], perceptualDepth);
     trace.actualExcursionSeconds = std::min(trace.requestedExcursionSeconds, (center-minimumDelay)*0.85/bound);
@@ -122,7 +143,16 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
 #endif
         }
     }
-    return {(1-p[Mix])*left+p[Mix]*trace.wetProminence*wet[0], (1-p[Mix])*right+p[Mix]*trace.wetProminence*wet[1]};
+  // BBD-only numerical tail hygiene; no global FTZ/DAZ or normal-value change.
+  if (backend == DelayBackend::ExperimentalBBD) {
+    for (auto &bank : banks)
+      bank.clearSubnormalState();
+    envelope.clearSubnormalState();
+    envelopeControl.clearSubnormalState();
+    for (auto &control : controls)
+      control.clearSubnormalState();
+  }
+  return {(1-p[Mix])*left+p[Mix]*trace.wetProminence*wet[0], (1-p[Mix])*right+p[Mix]*trace.wetProminence*wet[1]};
 }
 void DriftEngine::process(float* const* channels, std::size_t channelCount, std::size_t samples) noexcept {
     if (channelCount == 0 || channelCount > 2) return;
@@ -132,4 +162,4 @@ void DriftEngine::process(float* const* channels, std::size_t channelCount, std:
         if (channelCount == 2) channels[1][n] = static_cast<float>(out[1]);
     }
 }
-}
+} // namespace drift
