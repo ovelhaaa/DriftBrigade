@@ -87,6 +87,8 @@ Render render(const Audio &dry, const Candidate &c, const Group &g, int sr) {
     require(std::abs(r.requested-r.actual)<1e-15,"Engine reduced requested listening excursion");
     for (int ch=0;ch<2;++ch) for (int band=0;band<4;++band) {
       const double delay=t.delaySeconds[ch][band], mod=t.modulation[ch][band];
+      require(std::isfinite(delay) && delay<=.055 && std::isfinite(mod),
+              "Nonfinite modulation or delay outside listening envelope");
       r.delay[n][ch*4+band]=delay;
       r.minimum=std::min(r.minimum,delay); r.maximum=std::max(r.maximum,delay);
       r.modSquares+=mod*mod; r.modPeak=std::max(r.modPeak,std::abs(mod));
@@ -160,13 +162,24 @@ void regression(const Audio &dry, const Group &g, int sr) {
   }
   require(before==allocations.load(),"Digital regression callback allocated");
 }
-void objectiveTests(const std::filesystem::path *root=nullptr) {
+void objectiveTests(const std::filesystem::path *root=nullptr, bool voiceRetest=false) {
+  const auto plan=voiceRetest?voiceRetestGroups():groups();
+  if (voiceRetest) {
+    const auto &moderate=plan.front(), &full=plan.back();
+    require(moderate.source==2 && full.source==2 && moderate.sourceGain==full.sourceGain,
+            "Voice retest source differs");
+    require(moderate.settings.p[Chaos]==.5 && full.settings.p[Chaos]==1, "Incorrect Chaos levels");
+    for (std::size_t i=0;i<Count;++i)
+      require(i==Chaos || moderate.settings.p.values[i]==full.settings.p.values[i],
+              "Confounded voice retest parameters");
+    require(voicePermutation(0)!=voicePermutation(1), "Repeated blind mapping");
+  }
   std::unique_ptr<Csv> report;
   if (root) report=std::make_unique<Csv>(*root/"objective"/"sanity_rates.csv",
     std::vector<std::string>{"sample_rate","group","candidate","trajectory_error_seconds","clock_max_hz","max_events","clamps","guards","allocations","deterministic","digital_frozen_regression"});
   for (int sr:{44100,48000,88200}) {
     std::array<Audio,3> dry={source(0,sr,.75),source(1,sr,.75),source(2,sr,.75)};
-    for (const auto &g:groups()) {
+    for (const auto &g:plan) {
       oneFactor(g);
       auto baseline=render(dry[g.source],g.candidates.front(),g,sr);
       for (std::size_t i=0;i<g.candidates.size();++i) {
@@ -180,15 +193,16 @@ void objectiveTests(const std::filesystem::path *root=nullptr) {
           {"max_events",c.backend==DelayBackend::DigitalFractional?"NA":number(r.maxEvents)},
           {"clamps",c.backend==DelayBackend::DigitalFractional?"NA":number(r.clamps)},
           {"guards",c.backend==DelayBackend::DigitalFractional?"NA":number(r.guards)},
-          {"allocations",number(r.callbackAllocations)},{"deterministic","PASS"},{"digital_frozen_regression",g.set=="A"?"PASS":"NA"}});
+          {"allocations",number(r.callbackAllocations)},{"deterministic","PASS"},{"digital_frozen_regression",g.set=="A" || voiceRetest?"PASS":"NA"}});
       }
-      if (g.set=="A") regression(dry[g.source],g,sr);
+      if (g.set=="A" || voiceRetest) regression(dry[g.source],g,sr);
     }
   }
+  if (report) report->close();
+  if (voiceRetest) return;
   // The short scene is an inversion of the full conservative bound, not Depth=1.
   const auto shortScene=scene("short");
   require(shortScene.p[Depth]<.1,"Short-depth reserve missing");
-  const auto plan=groups();
   std::map<std::string,int> index;
   std::map<std::string,std::vector<int>> positions;
   for (const auto &g:plan) {
@@ -204,7 +218,6 @@ void objectiveTests(const std::filesystem::path *root=nullptr) {
     auto bounds=std::minmax_element(entry.second.begin(),entry.second.end());
     require(*bounds.second-*bounds.first<=1,"Blind positions not balanced");
   }
-  if (report) report->close();
 }
 std::array<double,3> spectralBands(const Audio &audio, int sr) {
   // Fixed one-pole analysis filters only; never used on listening output.
@@ -259,11 +272,18 @@ Row describe(const Group &g, const Candidate &c, const Render &r, const std::str
   for (std::size_t i=0;i<Count;++i) row[parameterSpecs[i].name]=number(g.settings.p.values[i]);
   return row;
 }
-void artifact(const std::filesystem::path &root) {
+void artifact(const std::filesystem::path &root, bool voiceRetest=false) {
+  const auto plan=voiceRetest?voiceRetestGroups():groups();
   for (const char *dir:{"dry","raw","level_matched","objective"}) std::filesystem::create_directories(root/dir);
   // Fail on README/open/flush errors before expensive rendering; stream-safety gate.
   auto readme=output(root/"README.txt");
-  readme<<"M3.0 BBD Listening Bake-off\nPRODUCTIZATION CANDIDATE / NOT SHIPPING DEFAULT\n"
+  if (voiceRetest)
+    readme<<"M3.1B.1 Controlled Organic Modulation Listening Retest\n"
+      <<"D03 and D04 use the same lead with Chaos 50% and 100%.\n"
+      <<"Start with LISTENING_GUIDE.md and keep the answer key and technical files closed.\n"
+      <<"12 processed WAVs and one dry reference. Stereo PCM24, 48 kHz, 10 seconds.\n"
+      <<"Matching uses one constant gain per file from the common active region [0.5, 7.5) s.\n";
+  else readme<<"M3.0 BBD Listening Bake-off\nPRODUCTIZATION CANDIDATE / NOT SHIPPING DEFAULT\n"
     <<"Listen first; record preference in LISTENING_SCORECARD.csv; then open ANSWER_KEY.csv.\n"
     <<"The manifest and objective reports also reveal identities. Keep them closed while listening.\n"
     <<"26 processed candidates in 12 groups; RAW + LEVEL_MATCHED = 52 listening WAVs, plus 3 dry references.\n"
@@ -280,22 +300,29 @@ void artifact(const std::filesystem::path &root) {
     <<"enabled 0.47 uF / 10 kohm compander, Nominal gain, ExternalWetReturn, existing 5 Hz output blocker.\n"
     <<"Economy changes only physical stages and its corresponding M2.9 clock budget.\n"
     <<"No subjective winner was selected. DigitalFractional remains the plugin/default backend.\n\nScene controls:\n";
-  for (const char *id:{"subtle","wide","slow","short","feedback","wide_high_chaos"}) {
+  if (!voiceRetest) for (const char *id:{"subtle","wide","slow","short","feedback","wide_high_chaos"}) {
     auto s=scene(id); readme<<id;
     for (std::size_t i=0;i<Count;++i) readme<<' '<<parameterSpecs[i].name<<'='<<s.p.values[i];
     readme<<'\n';
   }
   readme.flush();
-  std::filesystem::copy_file(std::filesystem::path(DRIFT_LISTENING_DOCS)/"m3_0_listening_guide.md",
+  std::filesystem::copy_file(std::filesystem::path(DRIFT_LISTENING_DOCS)/(voiceRetest?"m3_1b_organic_voice_listening_guide.md":"m3_0_listening_guide.md"),
     root/"LISTENING_GUIDE.md",std::filesystem::copy_options::overwrite_existing);
-  std::filesystem::copy_file(std::filesystem::path(DRIFT_LISTENING_DOCS)/"m3_0_bbd_listening_bakeoff.md",
+  std::filesystem::copy_file(std::filesystem::path(DRIFT_LISTENING_DOCS)/(voiceRetest?"m3_1b_organic_voice_retest.md":"m3_0_bbd_listening_bakeoff.md"),
     root/"TECHNICAL_NOTES.md",std::filesystem::copy_options::overwrite_existing);
   Csv manifest(root/"listening_render_manifest.csv",manifestColumns);
   Csv key(root/"ANSWER_KEY.csv",{"group","blind_filename","candidate_id","backend","stages","gain_profile","organic_variant","bank_mode"});
   Csv score(root/"LISTENING_SCORECARD.csv",{"set","pair_group","source","scene","blind_candidates","preferred_candidate","preference_strength_1_5","modulation_naturalness_1_5","stereo_quality_1_5","tonal_quality_1_5","transient_quality_1_5","tail_quality_1_5","artifacts_1_5","fatigue_1_5","comments"});
   Csv scenes(root/"scene_parameters.csv",{"scene","Motion","Depth","Center","Chaos","Coherence","Dynamics","Feedback","Mix","Width","conservative_bound_Wander","conservative_bound_PaperNarrowband","short_safe_depth_48k","short_safe_depth_44k1"});
-  for (const char *id:{"subtle","wide","slow","short","feedback","wide_high_chaos"}) {
-    auto s=scene(id); Row row={{"scene",id},{"conservative_bound_Wander",number(DriftEngine::combinedModulationBound(OrganicVariant::Wander))},
+  std::vector<Scene> scenesToWrite;
+  if (voiceRetest) {
+    for (const auto &g:plan) scenesToWrite.push_back(g.settings);
+  } else {
+    for (const char *id:{"subtle","wide","slow","short","feedback","wide_high_chaos"})
+      scenesToWrite.push_back(scene(id));
+  }
+  for (const auto &s:scenesToWrite) {
+    Row row={{"scene",s.id},{"conservative_bound_Wander",number(DriftEngine::combinedModulationBound(OrganicVariant::Wander))},
       {"conservative_bound_PaperNarrowband",number(DriftEngine::combinedModulationBound(OrganicVariant::PaperNarrowband))},
       {"short_safe_depth_48k",number(safeDepth(.9,.0025,48000,OrganicVariant::Wander))},
       {"short_safe_depth_44k1",number(safeDepth(.9,.0025,44100,OrganicVariant::Wander))}};
@@ -303,8 +330,9 @@ void artifact(const std::filesystem::path &root) {
     scenes.add(row);
   }
   scenes.close();
-  std::array<Audio,3> dry={source(0,listeningRate),source(1,listeningRate),source(2,listeningRate)};
-  for (int i=0;i<3;++i) {
+  std::array<Audio,3> dry;
+  for (int i=voiceRetest?2:0;i<3;++i) {
+    dry[i]=source(i,listeningRate);
     const auto name="dry/DRY_"+std::string(1,sourceLabel(i))+".wav";
     wav(root/name,dry[i],listeningRate);
     const auto m=measure(dry[i],0,dry[i].size());
@@ -317,10 +345,10 @@ void artifact(const std::filesystem::path &root) {
   }
   const char *reportNames[]={"backend_comparison.csv","stage_comparison.csv","gain_comparison.csv","modulation_comparison.csv","bank_comparison.csv"};
   std::array<std::unique_ptr<Csv>,5> reports;
-  for (int i=0;i<5;++i) reports[i]=std::make_unique<Csv>(root/"objective"/reportNames[i],manifestColumns);
+  for (int i=voiceRetest?3:0;i<(voiceRetest?4:5);++i) reports[i]=std::make_unique<Csv>(root/"objective"/reportNames[i],manifestColumns);
   std::map<std::string,int> groupIndex;
   double maxError=0, maxClock=0, maxPeak=0; std::uint32_t maxEvents=0;
-  for (const auto &g:groups()) {
+  for (const auto &g:plan) {
     oneFactor(g);
     std::vector<Render> renders;
     for (const auto &c:g.candidates) renders.push_back(render(dry[g.source],c,g,listeningRate));
@@ -331,7 +359,8 @@ void artifact(const std::filesystem::path &root) {
       require(active.rms()>1e-12,"Cannot level-match a silent render");
       target=std::min({target,active.rms(),.98*active.rms()/all.peak});
     }
-    const auto order=permutation(renders.size(),groupIndex[g.set]++);
+    const auto indexInSet=groupIndex[g.set]++;
+    const auto order=voiceRetest?voicePermutation(indexInSet):permutation(renders.size(),indexInSet);
     std::string labels;
     for (std::size_t slot=0;slot<order.size();++slot) {
       const auto index=order[slot]; const auto &c=g.candidates[index]; const auto &r=renders[index];
@@ -339,7 +368,7 @@ void artifact(const std::filesystem::path &root) {
       if (!labels.empty()) labels+=';'; labels+=name;
       const double error=trajectoryError(renders.front(),r);
       if (g.set!="D") require(error==0 && r.requested==renders.front().requested && r.actual==renders.front().actual,"Listening trajectories differ");
-      const bool repeated=g.id=="A01" || (g.id=="B02" && index==0) || g.id=="D02";
+      const bool repeated=voiceRetest || g.id=="A01" || (g.id=="B02" && index==0) || g.id=="D02";
       if (repeated) identical(r,render(dry[g.source],c,g,listeningRate));
       if (g.set=="A" && c.backend==DelayBackend::DigitalFractional) regression(dry[g.source],g,listeningRate);
       const double scalar=target/measure(r.audio,std::size_t(onset*listeningRate),std::size_t(excitationEnd*listeningRate)).rms();
@@ -365,12 +394,12 @@ void artifact(const std::filesystem::path &root) {
     score.add(scores);
     std::cout<<g.id<<": objective gates passed\n"<<std::flush;
   }
-  for (auto &report:reports) report->close();
+  for (auto &report:reports) if (report) report->close();
   manifest.close(); key.close(); score.close();
-  objectiveTests(&root);
+  objectiveTests(&root,voiceRetest);
   readme<<"\nObjective results: maximum pre-PCM matching error="<<maxError<<" dB; maximum output peak="<<maxPeak
-    <<"; maximum clock="<<maxClock<<" Hz; maximum physical events/sample/voice="<<maxEvents<<".\n"
-    <<"Exact Digital/BBD trajectories at every sample/channel/band; zero BBD hidden clamps/guards and callback allocations.\n"
+    <<"; maximum clock="<<maxClock<<" Hz; maximum physical events/sample/voice="<<maxEvents<<".\n";
+  if (!voiceRetest) readme<<"Exact Digital/BBD trajectories at every sample/channel/band; zero BBD hidden clamps/guards and callback allocations.\n"
     <<"Full-length deterministic repeats: A01 (both), B02 Economy, D02 (all three); every configuration repeated in short three-rate sanity.\n"
     <<"CPU factor is instrumented render time / audio duration, including telemetry, not a realtime qualification.\n"
     <<"Spectral RMS bands use fixed one-pole analysis at 500 and 4000 Hz, not disjoint FFT bands or an EQ match.\n";
@@ -380,11 +409,13 @@ void artifact(const std::filesystem::path &root) {
 int main(int argc, char **argv) {
   try {
     if (argc==2 && std::string(argv[1])=="--tests-only") objectiveTests();
+    else if (argc==2 && std::string(argv[1])=="--voice-tests-only") objectiveTests(nullptr,true);
+    else if (argc==3 && std::string(argv[1])=="--voice-retest") artifact(argv[2],true);
     else {
-      require(argc==2,"Usage: drift_bbd_listening_bakeoff OUTPUT | --tests-only");
+      require(argc==2,"Usage: drift_bbd_listening_bakeoff OUTPUT | --tests-only | --voice-retest OUTPUT | --voice-tests-only");
       artifact(argv[1]);
     }
-    std::cout<<"M3.0 objective gates passed. No subjective winner was selected.\n";
+    std::cout<<"Listening objective gates passed. No subjective winner was selected.\n";
     return 0;
   } catch (const std::exception &e) { std::cerr<<e.what()<<'\n'; return 1; }
 }

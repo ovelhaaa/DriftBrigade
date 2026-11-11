@@ -47,6 +47,13 @@ if(DRIFT_SANITIZE AND NOT MSVC)
   target_link_options(drift_bbd_listening_bakeoff PRIVATE -fsanitize=address,undefined)
 endif()
 add_test(NAME bbd_listening_numerical COMMAND drift_bbd_listening_bakeoff --tests-only)
+add_test(NAME bbd_listening_voice_numerical COMMAND drift_bbd_listening_bakeoff --voice-tests-only)
+add_test(NAME bbd_listening_voice_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_listening_bakeoff>
+  -DTOOL_ARGS=--voice-retest
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-listening-voice-stream-tests
+  -DBLOCKED_ARTIFACT=LISTENING_SCORECARD.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
 add_test(NAME bbd_listening_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
   -DTOOL=$<TARGET_FILE:drift_bbd_listening_bakeoff>
   -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-listening-stream-tests

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>DriftBrigade Listening Lab</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="guide.js"></script>
+  <script defer src="package.js"></script>
+  <script defer src="player.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <div><strong>DriftBrigade</strong><span>Listening Lab</span></div>
+    </div>
+    <div class="actions">
+      <button id="results-button" disabled>Resultados da audição</button>
+      <button class="primary" id="folder-button">Selecionar pasta</button>
+      <input id="folder" type="file" webkitdirectory hidden>
+      <input id="import-file" type="file" accept=".csv,text/csv" hidden>
+    </div>
+  </header>
+  <div id="status" class="status" role="status" hidden></div>
+  <main id="welcome" class="welcome">
+    <div class="kicker">AUDIÇÃO CEGA</div>
+    <h1>Listening Lab</h1>
+    <p>Compare versões do mesmo trecho, no mesmo instante, e registre o que funciona melhor para a sua música.</p>
+    <button id="welcome-folder" class="primary">Abrir pacote de audição</button>
+    <p class="muted">Selecione a pasta que contém o scorecard e os diretórios de áudio. A sessão fica neste navegador.</p>
+  </main>
+  <main id="lab" class="layout" hidden>
+    <aside class="sidebar">
+      <div class="session">
+        <div class="eyeline"><span>Progresso</span><strong id="progress-text"></strong></div>
+        <progress id="progress" value="0" aria-label="Testes avaliados"></progress>
+        <small id="package-label"></small>
+      </div>
+      <nav id="tests" aria-label="Grupos de teste"></nav>
+    </aside>
+    <section id="workspace" class="workspace" aria-labelledby="test-title">
+      <div class="test-header">
+        <div id="test-category" class="kicker"></div>
+        <h1 id="test-title"></h1>
+        <p id="test-description"></p>
+      </div>
+      <div class="columns">
+        <div class="listening">
+          <section class="panel player" aria-label="Player comparativo">
+            <div class="player-header">
+              <div><div class="kicker">MONITORAÇÃO</div><h2>Player comparativo</h2></div>
+              <span id="blind-state" class="pill">Teste cego</span>
+            </div>
+            <div class="segments" role="group" aria-label="Versão dos arquivos">
+              <button data-mode="level_matched" aria-pressed="true">LEVEL MATCHED</button>
+              <button data-mode="raw" aria-pressed="false">RAW</button>
+            </div>
+            <p id="mode-description" class="muted"></p>
+            <div class="source-buttons" role="group" aria-label="Sinal de monitoração">
+              <div id="candidates"></div>
+              <button id="dry" class="dry" aria-pressed="false">Ouvir original</button>
+            </div>
+            <div class="wave-label"><span>Forma de onda do original</span><output id="clock">00.0 / 10.0 s</output></div>
+            <div class="wave"><canvas id="wave" role="img" aria-label="Forma de onda estéreo da referência original"></canvas><i></i></div>
+            <input type="range" min="0" max="10" step="0.01" value="0" id="position" aria-label="Posição no trecho">
+            <div class="ticks" aria-hidden="true"><span>0 s</span><span>2</span><span>4</span><span>6</span><span>8</span><span>10 s</span></div>
+            <div class="transport">
+              <button class="primary" id="play">▶ Reproduzir</button>
+              <button id="restart">↶ Reiniciar</button>
+              <button id="loop" aria-pressed="false">↻ Loop</button>
+              <label class="volume">Volume <input id="volume" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+            </div>
+            <p id="audio-status" class="muted" role="status"></p>
+            <details class="shortcuts"><summary>Atalhos de teclado</summary>
+              <p><kbd>Espaço</kbd> play/pause · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> X/Y/Z · <kbd>0</kbd> original · <kbd>R</kbd> reiniciar · <kbd>L</kbd> loop · <kbd>M</kbd> trocar modo</p>
+            </details>
+          </section>
+          <section class="panel assisted">
+            <h2>Guia de audição</h2>
+            <ol id="steps"></ol>
+            <button id="next">Próximo teste →</button>
+          </section>
+        </div>
+        <section class="panel evaluation" aria-labelledby="evaluation-title">
+          <div class="kicker">SCORECARD</div>
+          <h2 id="evaluation-title">Avaliação musical</h2>
+          <fieldset><legend>Qual candidato você prefere musicalmente?</legend><div id="preferences"></div></fieldset>
+          <p class="muted scales">Qualidade: 1 baixa, 5 alta.<br>Artefatos e fadiga: 1 pouco ou nenhum, 5 forte.<br>Intensidade: 1 fraca, 5 forte.</p>
+          <div id="metrics"></div>
+          <label class="notes" for="comments">O que chamou sua atenção nesta comparação?</label>
+          <textarea id="comments" rows="4" placeholder="Trechos, texturas ou diferenças entre modos…"></textarea>
+          <small id="save-status" role="status"></small>
+        </section>
+      </div>
+    </section>
+    <section id="results" class="workspace" hidden aria-labelledby="results-title">
+      <div class="kicker">SCORECARD</div>
+      <h1 id="results-title">Resultados da audição</h1>
+      <p id="result-count"></p>
+      <div class="result-actions">
+        <button id="export-csv" class="primary">Exportar CSV</button>
+        <button id="export-md">Exportar Markdown</button>
+        <button id="import">Importar avaliação</button>
+        <button id="reveal">Revelar resultados</button>
+      </div>
+      <p id="key-status" class="muted" role="status"></p>
+      <div id="result-list"></div>
+    </section>
+  </main>
+  <dialog id="confirm">
+    <form method="dialog">
+      <h2>Revelar resultados?</h2>
+      <p>Registre suas preferências antes de conhecer as identidades. Ao continuar, você verá a correspondência de X, Y e Z em cada teste.</p>
+      <div class="actions">
+        <button value="cancel" autofocus>Continuar às cegas</button>
+        <button value="reveal" class="primary">Revelar identidades</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

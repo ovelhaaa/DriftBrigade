@@ -120,6 +120,15 @@ inline std::vector<Group> groups() {
     {"E","E02",1,scene("subtle"),{b,s}}
   };
 }
+inline std::vector<Group> voiceRetestGroups() {
+  const auto plan=groups();
+  const auto original=std::find_if(plan.begin(),plan.end(),[](const Group &g){ return g.id=="D02"; });
+  require(original!=plan.end(),"Original voice scene missing");
+  auto moderate=*original, full=*original;
+  moderate.id="D03"; moderate.settings.id="voice_moderate_chaos"; moderate.settings.p[Chaos]=.5;
+  full.id="D04"; full.settings.id="voice_full_chaos";
+  return {moderate,full};
+}
 inline char sourceLabel(int kind) { return char('A'+kind); }
 inline std::uint32_t sourceSeed(int kind) { return scramble(bakeoffSeed+std::uint32_t(kind)); }
 inline double phase(int kind, int partial) {
@@ -228,5 +237,21 @@ inline std::vector<std::size_t> permutation(std::size_t count, int groupIndex) {
   const auto offset=(scramble(bakeoffSeed)%count+std::size_t(groupIndex))%count;
   for (std::size_t i=0;i<count;++i) order[i]=(i+offset)%count;
   return order;
+}
+constexpr std::uint32_t voiceBlindSeed=0x4d334231u;
+inline std::vector<std::size_t> voicePermutation(int groupIndex) {
+  // Shuffle separately per group, rejecting the previous experiment's order
+  // and any duplicate between the two new groups.
+  const auto original=permutation(3,1);
+  const auto first=groupIndex==0?original:voicePermutation(0);
+  auto state=scramble(voiceBlindSeed+std::uint32_t(groupIndex));
+  for (;;) {
+    std::vector<std::size_t> order={0,1,2};
+    for (std::size_t i=order.size()-1;i>0;--i) {
+      state=scramble(state+0x9e3779b9u);
+      std::swap(order[i],order[state%(i+1)]);
+    }
+    if (order!=original && order!=first) return order;
+  }
 }
 } // namespace listening

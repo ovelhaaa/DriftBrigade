@@ -10,10 +10,6 @@ import wave
 
 SIZES = {"A01": 2, "A02": 2, "A03": 2, "A04": 2, "B01": 2, "B02": 2,
          "C01": 2, "C02": 2, "D01": 3, "D02": 3, "E01": 2, "E02": 2}
-NAMES = [f"SET_{group}_{label}.wav" for group, size in SIZES.items()
-         for label in "XYZ"[:size]]
-EXPECTED = {f"{version}/{name}" for version in ("raw", "level_matched") for name in NAMES}
-EXPECTED |= {f"dry/DRY_{label}.wav" for label in "ABC"}
 LSB = 1 / 8388608
 
 
@@ -52,25 +48,67 @@ def rms(samples):
     return math.sqrt(math.fsum(x * x for x in active) / len(active))
 
 
-def verify(root, compare=None):
+def verify_voice_controls(manifest, key, score, digests, original):
+    variants = {"Wander", "PaperNarrowband", "PhaseDrift"}
+    orders = []
+    for group, chaos, scene in (("D03", .5, "voice_moderate_chaos"), ("D04", 1, "voice_full_chaos")):
+        members = [r for r in manifest if r["group"] == group and r["version"] == "raw"]
+        order = [r["organic_variant"] for r in sorted(key, key=lambda r: r["blind_filename"])
+                 if r["group"] == group]
+        assert set(order) == variants
+        orders.append(order)
+        score_row = next(r for r in score if r["pair_group"] == group)
+        assert (score_row["set"], score_row["source"], score_row["scene"]) == ("D", "C", scene)
+        for r in members:
+            assert (r["source"], r["set"], r["scene"], r["backend"], r["gain_profile"], r["bank_mode"]) == (
+                "C", "D", scene, "ExperimentalBBD", "Nominal", "Gentle")
+            for field, value in dict(Chaos=chaos, Motion=.7, Depth=.25, Center=12, Coherence=.3,
+                                     Dynamics=.15, Feedback=.1, Mix=.5, Width=.95, seed=77,
+                                     source_gain=1, stages=1024, product_clock_cap_hz=384000,
+                                     product_delay_floor_seconds=1024/768000).items():
+                assert float(r[field]) == value, (group, field)
+            assert 0 < float(r["modulation_rms"]) <= float(r["modulation_peak"])
+            assert float(r["delay_min_seconds"]) <= float(r["delay_max_seconds"]) <= .055
+            assert 0 < float(r["bbd_clock_min_hz"]) <= float(r["bbd_clock_max_hz"])
+    assert orders[0] != orders[1]
+    assert all(order != ["PhaseDrift", "Wander", "PaperNarrowband"] for order in orders)
+    assert len({r["source_seed"] for r in manifest}) == 1
+    assert len({r["actual_excursion_seconds"] for r in manifest if r["version"] != "dry"}) == 1
+    if original:
+        def digest(path):
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        assert digest(original / "dry/DRY_C.wav") == digests["dry/DRY_C.wav"]
+        d02 = {r["organic_variant"]: r["blind_filename"] for r in rows(original / "ANSWER_KEY.csv")
+               if r["group"] == "D02"}
+        for r in key:
+            if r["group"] == "D04":
+                assert digest(original / "raw" / d02[r["organic_variant"]]) == digests["raw/" + r["blind_filename"]]
+
+
+def verify(root, compare=None, voice_retest=False, original=None):
+    sizes = {"D03": 3, "D04": 3} if voice_retest else SIZES
+    names = {f"SET_{group}_{label}.wav" for group, size in sizes.items()
+             for label in "XYZ"[:size]}
+    expected = {f"{version}/{name}" for version in ("raw", "level_matched") for name in names}
+    expected |= {f"dry/DRY_{label}.wav" for label in ("C" if voice_retest else "ABC")}
     manifest = rows(root / "listening_render_manifest.csv")
     indexed = {row["blind_filename"]: row for row in manifest}
-    assert len(manifest) == len(indexed) == 55 and set(indexed) == EXPECTED
-    assert {str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*.wav")} == EXPECTED
+    assert len(manifest) == len(indexed) == len(expected) and set(indexed) == expected
+    assert {str(p.relative_to(root)).replace("\\", "/") for p in root.rglob("*.wav")} == expected
     key = rows(root / "ANSWER_KEY.csv")
-    assert len(key) == 26 and {r["blind_filename"] for r in key} == set(NAMES)
+    assert len(key) == len(names) and {r["blind_filename"] for r in key} == set(names)
     mapping = {r["blind_filename"]: r for r in key}
     score = rows(root / "LISTENING_SCORECARD.csv")
-    assert len(score) == 12 and {r["pair_group"] for r in score} == set(SIZES)
+    assert len(score) == len(sizes) and {r["pair_group"] for r in score} == set(sizes)
     for row in score:
-        assert set(row["blind_candidates"].split(";")) == {f"SET_{row['pair_group']}_{v}.wav" for v in "XYZ"[:SIZES[row["pair_group"]]]}
+        assert set(row["blind_candidates"].split(";")) == {f"SET_{row['pair_group']}_{v}.wav" for v in "XYZ"[:sizes[row["pair_group"]]]}
         for field in row:
             if field not in ("set", "pair_group", "source", "scene", "blind_candidates"):
                 assert row[field] == "", "Subjective score was prefilled"
 
     digests, maximum_error, maximum_peak, constant_gain_error = {}, 0, 0, 0
     matched_by_group = {}
-    for filename in sorted(EXPECTED):
+    for filename in sorted(expected):
         row, path = indexed[filename], root / filename
         for field, value in row.items():
             if value == "NA":
@@ -94,6 +132,8 @@ def verify(root, compare=None):
             assert digests[filename] == hashlib.sha256((compare / filename).read_bytes()).hexdigest(), f"Nondeterministic WAV {filename}"
         if row["version"] == "dry":
             assert row["backend"] == "NA"
+            if voice_retest:
+                assert values[::2] == values[1::2], "Dry voice is not duplicated mono"
             assert not any(values[:24000 * 2]) and not any(values[360000 * 2:])
             continue
         identity = mapping[path.name]
@@ -112,24 +152,33 @@ def verify(root, compare=None):
         else:
             for field in ("stages", "gain_profile", "bbd_clock_min_hz", "bbd_clock_max_hz", "internal_peak", "nominal_domain_occupancy", "total_events", "hidden_clamp_count", "numerical_guard_count"):
                 assert row[field] == "NA", (filename, field)
+        if voice_retest:
+            raw_row = indexed[f"raw/{path.name}"]
+            for field in ("source", "scene", "seed", "source_seed", "source_gain", "Motion",
+                          "Depth", "Center", "Chaos", "Coherence", "Dynamics", "Feedback", "Mix", "Width",
+                          "requested_excursion_seconds", "actual_excursion_seconds"):
+                assert row[field] == raw_row[field], (filename, field)
+            assert row["deterministic_repeat"] == "PASS"
         if row["version"] == "level_matched":
             assert peak <= .98 + LSB
             raw = pcm(root / "raw" / path.name)
             gain = 10 ** (float(row["level_match_gain_db"]) / 20)
             error = max(abs(y - x * gain) for x, y in zip(raw, values))
             assert error <= (1 + gain) * LSB * .501, f"Not constant-scalar matching: {filename}"
+            if voice_retest:
+                assert abs(float(row["rms_matching_error_db"])) <= .1
             constant_gain_error = max(constant_gain_error, error)
             matched_by_group.setdefault(row["group"], []).append(measured)
     for group, values in matched_by_group.items():
-        assert len(values) == SIZES[group]
+        assert len(values) == sizes[group]
         error = db(max(values) / min(values))
         assert error <= .1, (group, error)
         maximum_error = max(maximum_error, error)
     # Each comparison changes exactly its intended principal factor.
     factor = {"A": "backend", "B": "stages", "C": "gain_profile", "D": "organic_variant", "E": "bank_mode"}
-    for group in SIZES:
+    for group in sizes:
         members = [r for r in manifest if r["group"] == group and r["version"] == "raw"]
-        assert len(members) == SIZES[group]
+        assert len(members) == sizes[group]
         varied = factor[group[0]]
         for field in ("backend", "stages", "gain_profile", "organic_variant", "bank_mode"):
             # Digital stages/gain have NA semantics, not a second architecture change.
@@ -138,28 +187,38 @@ def verify(root, compare=None):
             assert (len({r[field] for r in members}) > 1) == (field == varied), (group, field)
         for field in ("source", "scene", "seed", "source_seed", "source_gain", "Motion", "Depth", "Center", "Chaos", "Coherence", "Dynamics", "Feedback", "Mix", "Width"):
             assert len({r[field] for r in members}) == 1, (group, field)
+    if voice_retest:
+        verify_voice_controls(manifest, key, score, digests, original)
     sanity = rows(root / "objective" / "sanity_rates.csv")
-    assert len(sanity) == 78 and {r["sample_rate"] for r in sanity} == {"44100", "48000", "88200"}
+    assert len(sanity) == 3 * len(names) and {r["sample_rate"] for r in sanity} == {"44100", "48000", "88200"}
     assert all(r["deterministic"] == "PASS" and r["allocations"] == "0" for r in sanity)
     assert all(r["clamps"] in ("0", "NA") and r["guards"] in ("0", "NA") for r in sanity)
     assert all(float(r["trajectory_error_seconds"]) == 0 for r in sanity if not r["group"].startswith("D"))
-    for name, count in (("backend", 8), ("stage", 4), ("gain", 4), ("modulation", 6), ("bank", 4)):
+    if voice_retest:
+        assert {(r["group"], r["candidate"], r["sample_rate"]) for r in sanity} == {
+            (r["group"], r["candidate_id"], rate) for r in key for rate in ("44100", "48000", "88200")}
+        assert all(r["digital_frozen_regression"] == "PASS" for r in sanity)
+    reports = (("modulation", 6),) if voice_retest else (
+        ("backend", 8), ("stage", 4), ("gain", 4), ("modulation", 6), ("bank", 4))
+    for name, count in reports:
         assert len(rows(root / "objective" / f"{name}_comparison.csv")) == count
-    assert len(rows(root / "scene_parameters.csv")) == 6
+    assert len(rows(root / "scene_parameters.csv")) == (2 if voice_retest else 6)
     assert (root / "LISTENING_GUIDE.md").is_file()
     with (root / "SHA256SUMS.txt").open("w", encoding="utf-8", newline="\n") as stream:
         for name, checksum in sorted(digests.items()):
             stream.write(f"{checksum}  {name}\n")
-    result = dict(wavs=55, processed_candidates=26, groups=12, sample_rate=48000,
-                  format="stereo PCM 24-bit", frames_per_wav=480000, blind_seed="0x4d333042",
+    result = dict(wavs=len(expected), processed_candidates=len(names), groups=len(sizes), sample_rate=48000,
+                  format="stereo PCM 24-bit", frames_per_wav=480000, blind_seed="0x4d334231" if voice_retest else "0x4d333042",
                   maximum_pcm_matching_error_db=maximum_error, maximum_pcm_output_peak=maximum_peak,
                   maximum_constant_gain_quantization_error=constant_gain_error,
                   maximum_bbd_clock_hz=max(float(r["bbd_clock_max_hz"]) for r in manifest if r["backend"] == "ExperimentalBBD"),
                   maximum_events_per_sample_per_voice=max(float(r["maximum_events_per_sample_per_voice"]) for r in manifest if r["backend"] == "ExperimentalBBD"),
                   hidden_clamps=0, numerical_guards=0, callback_allocations=0,
-                  common_trajectory="EXACT", digital_frozen_regression="PASS",
-                  deterministic_wav_checksums="ALL_55_PASS" if compare else "NOT_INDEPENDENTLY_COMPARED",
+                  common_trajectory="NATIVE_VARIANTS" if voice_retest else "EXACT", digital_frozen_regression="PASS",
+                  deterministic_wav_checksums=f"ALL_{len(expected)}_PASS" if compare else "NOT_INDEPENDENTLY_COMPARED",
                   subjective_winner="NONE", production_backend="DigitalFractional")
+    if voice_retest:
+        result["original_d02_raw_and_dry"] = "PASS" if original else "NOT_COMPARED"
     (root / "VERIFICATION.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
 
@@ -168,5 +227,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--compare", type=pathlib.Path, help="Independent rerender directory; compare every WAV SHA-256")
+    parser.add_argument("--voice-retest", action="store_true", help="Verify the standalone M3.1B.1 package")
+    parser.add_argument("--original", type=pathlib.Path, help="M3.0 package from the same toolchain")
     args = parser.parse_args()
-    verify(args.output, args.compare)
+    if args.original and not args.voice_retest:
+        parser.error("--original requires --voice-retest")
+    verify(args.output, args.compare, args.voice_retest, args.original)
