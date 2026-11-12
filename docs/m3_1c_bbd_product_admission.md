@@ -46,7 +46,11 @@ O limite de Wander é √3 para todo Chaos efetivo, inclusive a contribuição d
 - `CenterBelowFloor`, `ExcursionOutOfRange` e `ClockLimitExceeded` identificam violações do envelope.
 - `PreparationFailed` identifica falha ao inicializar o BBD após a admissão. `FallbackToDigital` confirma que o Digital foi preparado. `DigitalPreparationFailed` identifica a falha da tentativa Digital e preserva o status BBD.
 
-A preparação e o reset são serializados pelo chamador com o processamento parado. O motor publica prontidão depois de preparar e reinicializar as oito vozes. O fallback usa a preparação Digital e a normalização de taxa legadas. Uma taxa não finita ou fora do domínio de entrada de 8 a 384 kHz deixa o motor indisponível. Se houver falha parcial, os buffers já alocados podem ser reaproveitados em outra preparação, mas o callback só processa uma configuração completa. Enquanto indisponível, o motor devolve silêncio.
+A preparação e o reset são serializados pelo chamador com o processamento parado. O motor publica prontidão depois de preparar e reinicializar as oito vozes. Em `prepareProduct`, BBD e Digital usam a taxa exata solicitada pelo host. O fallback Digital aceita taxas finitas de 44.100 a 192.000 Hz, inclusive. Sem backend compatível, o resultado é `Unavailable`. Taxas não finitas ou fora do domínio de entrada de 8 a 384 kHz recebem `InvalidConfiguration`. A normalização de taxa continua restrita ao `prepare` legado.
+
+O BBD aplica os valores iniciais validados na admissão. O fallback Digital limita cada valor inicial finito ao intervalo de `parameterSpecs` e substitui NaN e infinitos pelo valor inicial da especificação daquele controle. A caixa de automação se aplica à sessão BBD. `request.initial` registra o pedido original e `appliedInitial` registra os alvos usados no reset da preparação bem-sucedida.
+
+Em caso de indisponibilidade ou falha parcial, `preparedBackend` é `Unavailable`, `preparedSampleRate` é zero e `appliedInitial` fica vazio. O motor devolve silêncio até uma nova preparação bem-sucedida. Os buffers já alocados podem ser reaproveitados nessa preparação.
 
 O reset limpa bancos, suavizadores, moduladores, armazenamento BBD, filtros, compander, retorno e bloqueador DC. O BBD admitido volta ao último Center válido e restaura as seeds. Reprepare descarta a cauda e reavalia a sessão. O tamanho de bloco não faz parte da configuração das vozes. Não há troca de backend no callback, novas alocações, locks, I/O, parâmetros APVTS ou alteração da topologia de feedback.
 

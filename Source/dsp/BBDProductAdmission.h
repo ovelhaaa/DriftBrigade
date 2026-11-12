@@ -1,6 +1,7 @@
 #pragma once
 #include "BBDModulatedDelayVoice.h"
 #include "params/ParameterSpecs.h"
+#include <optional>
 
 namespace drift {
 enum class BBDProductProfile { Balanced1024 };
@@ -27,6 +28,7 @@ struct BBDAdmissionResult {
     DelayBackend requestedBackend = DelayBackend::ExperimentalBBD;
     DelayBackend preparedBackend = DelayBackend::Unavailable;
     BBDAdmissionRequest request;
+    std::optional<EngineParameters> appliedInitial;
     BBDAdmissionStatus status = BBDAdmissionStatus::NotRequested;
     BBDPreparationOutcome outcome = BBDPreparationOutcome::Unavailable;
     double sampleRate = 0, preparedSampleRate = 0;

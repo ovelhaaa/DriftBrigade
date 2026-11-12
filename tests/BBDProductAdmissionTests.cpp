@@ -24,31 +24,59 @@ BBDAdmissionRequest nominalScene() {
     return fixed(parameters);
 }
 
+BBDAdmissionResult prepareProduct(DriftEngine& engine, double rate,
+                                  const BBDAdmissionRequest& request,
+                                  std::uint32_t seed = 0x44524946u) {
+    const auto result = engine.prepareProduct(rate, request, seed);
+    const auto expectedBackend = result.outcome == Outcome::BBD
+        ? DelayBackend::ExperimentalBBD : result.outcome == Outcome::FallbackToDigital
+        ? DelayBackend::DigitalFractional : DelayBackend::Unavailable;
+    const bool success = expectedBackend != DelayBackend::Unavailable;
+    check(engine.isPrepared() == success && result.preparedBackend == expectedBackend &&
+          engine.delayBackend() == expectedBackend, "preparation outcome matches active backend");
+    check(result.preparedSampleRate == (success ? rate : 0.) &&
+          result.appliedInitial.has_value() == success, "prepared rate and parameters");
+    check(engine.bbdAdmission().outcome == result.outcome &&
+          engine.bbdAdmission().preparedBackend == result.preparedBackend &&
+          engine.bbdAdmission().preparedSampleRate == result.preparedSampleRate,
+          "stored admission matches returned result");
+    if (expectedBackend == DelayBackend::DigitalFractional)
+        check(engine.minimumDelaySeconds() == 4. / rate, "Digital timing uses requested rate");
+    if (result.outcome == Outcome::BBD)
+        check(result.appliedInitial->values == result.request.initial.values, "BBD initial values");
+    if (!success)
+        check(engine.processSample(1, 1) == std::array<double, 2>{}, "unavailable engine output");
+    return result;
+}
+
 void rateMatrix() {
     DriftEngine engine;
-    for (double rate : {44100., 48000., 88200., 96000., 176400., 192000., 32000., 50000.}) {
-        const auto result = engine.prepareProduct(rate, nominalScene());
+    for (double rate : {44100., 8000., 32000., 48000., 88200., 96000., 176400.,
+                        192000., 384000., 44099.99, 192000.01, 50000.5}) {
+        const auto result = prepareProduct(engine, rate, nominalScene());
         const bool qualified = rate == 44100 || rate == 48000 || rate == 88200;
         check(result.requestedBackend == DelayBackend::ExperimentalBBD &&
-              result.sampleRate == rate && engine.isPrepared(), "rate preparation");
+              result.sampleRate == rate, "requested rate");
         if (qualified) {
             check(result.status == Status::Admitted && result.outcome == Outcome::BBD,
                   "qualified rate");
             check(result.maximumClockHz == std::min(384000., 8 * rate) &&
                   result.minimumDelaySeconds == 1024 / (2 * result.maximumClockHz) &&
                   engine.minimumDelaySeconds() == result.minimumDelaySeconds, "rate limits");
-        } else {
+        } else if (rate >= 44100 && rate <= 192000) {
             check(result.status == Status::UnsupportedSampleRate &&
                   result.outcome == Outcome::FallbackToDigital &&
                   result.preparedBackend == DelayBackend::DigitalFractional,
                   "unsupported rate fallback");
+        } else {
+            check(result.status == Status::UnsupportedSampleRate &&
+                  result.outcome == Outcome::Unavailable, "outside Digital rate range");
         }
-        check(engine.delayBackend() == result.preparedBackend, "active backend");
     }
     const auto nan = std::numeric_limits<double>::quiet_NaN();
     const auto inf = std::numeric_limits<double>::infinity();
-    for (double rate : {0., -48000., nan, inf}) {
-        const auto result = engine.prepareProduct(rate, {});
+    for (double rate : {0., -48000., nan, inf, -inf}) {
+        const auto result = prepareProduct(engine, rate, {});
         check(result.status == Status::InvalidConfiguration && result.outcome == Outcome::Unavailable &&
               !engine.isPrepared() && engine.delayBackend() == DelayBackend::Unavailable, "invalid rate");
     }
@@ -61,7 +89,7 @@ void physicalLimits() {
         const double floor = 1024 / (2 * std::min(384000., 8 * rate));
         p[Depth] = 0;
         p[Center] = floor * 1000;
-        const auto result = engine.prepareProduct(rate, fixed(p));
+        const auto result = prepareProduct(engine, rate, fixed(p));
         check(result.status == Status::Admitted, "center exactly at floor");
         for (int n = 0; n < 300; ++n)
             engine.processSample(n == 0 ? 1 : 0, 0);
@@ -76,10 +104,10 @@ void physicalLimits() {
                       core.minimumDelaySeconds() == floor, "all eight voices configured");
             }
         p[Center] -= .000001;
-        check(engine.prepareProduct(rate, fixed(p)).status == Status::CenterBelowFloor,
+        check(prepareProduct(engine, rate, fixed(p)).status == Status::CenterBelowFloor,
               "below floor");
         p[Center] += .100001;
-        check(engine.prepareProduct(rate, fixed(p)).status == Status::Admitted, "above floor");
+        check(prepareProduct(engine, rate, fixed(p)).status == Status::Admitted, "above floor");
         p[Motion] = 1;
         const double maxExcursion = engine.bbdAdmission().maximumExcursionSeconds;
         p[Depth] = .999 * maxExcursion / depthSeconds(p[Motion], .25) * .25;
@@ -92,7 +120,7 @@ void physicalLimits() {
     request.clockCeilingHz = 384001;
     check(evaluateBBDAdmission(48000, request).status == Status::ClockLimitExceeded, "excessive clock");
     request.clockCeilingHz = 300000;
-    const auto result = engine.prepareProduct(48000, request);
+    const auto result = prepareProduct(engine, 48000, request);
     check(result.status == Status::Admitted && result.maximumClockHz == 300000 &&
           engine.minimumDelaySeconds() == 1024. / 600000., "tightened clock");
 
@@ -126,8 +154,8 @@ void automationAndReset() {
           "unsafe combination inside box with valid initial parameters");
 
     DriftEngine engine, reference;
-    check(engine.prepareProduct(48000, request, 77).status == Status::Admitted &&
-          reference.prepareProduct(48000, request, 77).status == Status::Admitted, "automation box");
+    check(prepareProduct(engine, 48000, request, 77).status == Status::Admitted &&
+          prepareProduct(reference, 48000, request, 77).status == Status::Admitted, "automation box");
     engine.setOrganicVariant(OrganicVariant::PhaseDrift);
     engine.setBankMode(BankMode::Selective);
     engine.usePerceptualDepth(false);
@@ -171,7 +199,7 @@ void automationAndReset() {
     engine.reset(77);
     auto fresh = request;
     fresh.initial = hi;
-    reference.prepareProduct(48000, fresh, 77);
+    prepareProduct(reference, 48000, fresh, 77);
     for (int n = 0; n < 2048; ++n) {
         const double x = n == 0 ? 1.0 : 0.0;
         check(engine.processSample(x, x) == reference.processSample(x, x), "deterministic reset");
@@ -196,20 +224,37 @@ void fallbackAndRecovery() {
     DriftEngine engine, digital;
     BBDAdmissionRequest request;
     request.profile = static_cast<BBDProductProfile>(123);
-    check(engine.prepareProduct(48000, request).status == Status::UnsupportedProfile, "profile");
+    check(prepareProduct(engine, 48000, request).status == Status::UnsupportedProfile, "profile");
     request = {};
     request.physicalStages = 512;
-    check(engine.prepareProduct(48000, request).status == Status::UnsupportedProfile, "stage profile");
+    check(prepareProduct(engine, 48000, request).status == Status::UnsupportedProfile, "stage profile");
     request.physicalStages = 1023;
-    check(engine.prepareProduct(48000, request).status == Status::InvalidConfiguration, "invalid stages");
+    check(prepareProduct(engine, 48000, request).status == Status::InvalidConfiguration, "invalid stages");
     request = {};
     request.initial[Depth] = std::numeric_limits<double>::quiet_NaN();
-    const auto rejected = engine.prepareProduct(48000, request);
+    request.initial[Center] = std::numeric_limits<double>::infinity();
+    request.initial[Motion] = -std::numeric_limits<double>::infinity();
+    request.initial[Feedback] = 2;
+    request.initial[Mix] = .7;
+    const auto rejected = prepareProduct(engine, 48000, request, 42);
+    EngineParameters expected;
+    expected[Feedback] = parameterSpecs[Feedback].maximum;
+    expected[Mix] = .7;
     check(rejected.status == Status::InvalidConfiguration &&
-          rejected.outcome == Outcome::FallbackToDigital, "invalid parameter fallback");
+          rejected.outcome == Outcome::FallbackToDigital &&
+          rejected.appliedInitial->values == expected.values &&
+          std::isnan(rejected.request.initial[Depth]), "invalid parameter fallback");
+    digital.setParameters(expected);
+    digital.prepare(48000, 42);
+    for (int n = 0; n < 4096; ++n) {
+        const double x = n == 0 ? 1.0 : 0.0;
+        const auto output = engine.processSample(x, -x);
+        check(std::isfinite(output[0]) && std::isfinite(output[1]) &&
+              output == digital.processSample(x, -x), "sanitized Digital identity");
+    }
 
     engine.qualificationFailPrepare(true, false);
-    const auto fallback = engine.prepareProduct(48000, nominalScene(), 42);
+    const auto fallback = prepareProduct(engine, 48000, nominalScene(), 42);
     check(fallback.status == Status::PreparationFailed && fallback.outcome == Outcome::FallbackToDigital,
           "partial BBD prepare fallback");
     digital.setParameters(fallback.request.initial);
@@ -223,13 +268,17 @@ void fallbackAndRecovery() {
         digital.reset(42);
     }
     engine.qualificationFailPrepare(true, true);
-    const auto failed = engine.prepareProduct(48000, nominalScene());
+    const auto failed = prepareProduct(engine, 48000, nominalScene());
     check(failed.status == Status::PreparationFailed && failed.outcome == Outcome::DigitalPreparationFailed &&
           !engine.isPrepared() && engine.delayBackend() == DelayBackend::Unavailable, "both prepares failed");
     engine.reset();
     check(engine.processSample(1, 1) == std::array<double, 2>{}, "unavailable engine output");
+    engine.qualificationFailPrepare(false, true);
+    const auto digitalFailed = prepareProduct(engine, 96000, nominalScene());
+    check(digitalFailed.status == Status::UnsupportedSampleRate &&
+          digitalFailed.outcome == Outcome::DigitalPreparationFailed, "Digital-only failure");
     engine.qualificationFailPrepare(false, false);
-    check(engine.prepareProduct(88200, engine.bbdAdmission().request).outcome == Outcome::BBD,
+    check(prepareProduct(engine, 88200, engine.bbdAdmission().request).outcome == Outcome::BBD,
           "reprepare after failed fallback");
     engine.prepare(48000);
     check(engine.delayBackend() == DelayBackend::DigitalFractional &&

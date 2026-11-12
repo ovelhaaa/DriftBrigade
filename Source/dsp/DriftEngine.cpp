@@ -10,6 +10,7 @@ constexpr std::array<double, 4> stereoRates {1.113, 0.943, 1.057, 0.887};
 constexpr double dynamicsChaos = 0.20, dynamicsFeedback = 0.08, quietWetReduction = 0.55;
 constexpr double balancedClockCeiling = 384000, balancedEventsPerSample = 16;
 constexpr double excursionReserve = 0.85;
+constexpr double minimumDigitalSampleRate = 44100, maximumDigitalSampleRate = 192000;
 
 bool validParameters(const EngineParameters& parameters) noexcept {
     for (std::size_t i = 0; i < Count; ++i) {
@@ -32,6 +33,16 @@ bool contains(const BBDAutomationEnvelope& envelope, const EngineParameters& par
 bool validProductHostRate(double rate) noexcept {
     return std::isfinite(rate) && rate >= ClockedBBDCore::minimumHostSampleRate &&
            rate <= ClockedBBDCore::maximumHostSampleRate;
+}
+
+EngineParameters digitalInitialParameters(EngineParameters parameters) noexcept {
+    for (std::size_t i = 0; i < Count; ++i) {
+        const auto& spec = parameterSpecs[i];
+        const double value = parameters.values[i];
+        parameters.values[i] = std::isfinite(value)
+            ? bounded(value, spec.minimum, spec.maximum) : spec.initial;
+    }
+    return parameters;
 }
 } // namespace
 
@@ -101,7 +112,7 @@ void DriftEngine::prepare(double sr, std::uint32_t seed) {
     automationStatus = BBDAutomationStatus::Inactive;
     backend = researchBackend;
     bbdConfig = researchConfig;
-    prepareBackend(bounded(sr, 44100, 192000), seed);
+    prepareBackend(bounded(sr, minimumDigitalSampleRate, maximumDigitalSampleRate), seed);
 }
 
 BBDAdmissionResult DriftEngine::prepareProduct(double sr, const BBDAdmissionRequest& request,
@@ -115,16 +126,14 @@ BBDAdmissionResult DriftEngine::prepareProduct(double sr, const BBDAdmissionRequ
     setBankMode(BankMode::Gentle);
     setDynamicsMode(DynamicsMode::Current);
     usePerceptualDepth(true);
-    setParameters(result.request.initial);
 
     if (result.status == BBDAdmissionStatus::Admitted) {
         backend = DelayBackend::ExperimentalBBD;
         bbdConfig = BBDVoiceConfig::fullResearchFixture();
+        setParameters(result.request.initial);
         productActive = true;
         try {
             prepareBackend(sr, seed, result.maximumClockHz);
-            result.preparedBackend = backend;
-            result.preparedSampleRate = sampleRate;
             result.outcome = BBDPreparationOutcome::BBD;
             automationStatus = BBDAutomationStatus::Accepted;
         } catch (...) {
@@ -132,17 +141,22 @@ BBDAdmissionResult DriftEngine::prepareProduct(double sr, const BBDAdmissionRequ
             result.status = BBDAdmissionStatus::PreparationFailed;
         }
     }
-    if (!prepared && validProductHostRate(sr)) {
+    if (!prepared && std::isfinite(sr) && sr >= minimumDigitalSampleRate &&
+        sr <= maximumDigitalSampleRate) {
         backend = DelayBackend::DigitalFractional;
+        setParameters(digitalInitialParameters(result.request.initial));
         try {
-            prepareBackend(bounded(sr, 44100, 192000), seed);
-            result.preparedBackend = backend;
-            result.preparedSampleRate = sampleRate;
+            prepareBackend(sr, seed);
             result.outcome = BBDPreparationOutcome::FallbackToDigital;
         } catch (...) {
             // Both attempts publish readiness only after all voices reset.
             result.outcome = BBDPreparationOutcome::DigitalPreparationFailed;
         }
+    }
+    if (prepared) {
+        result.preparedBackend = backend;
+        result.preparedSampleRate = sampleRate;
+        result.appliedInitial = targets;
     }
     admission = result;
     return result;
