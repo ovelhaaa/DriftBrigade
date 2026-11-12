@@ -79,6 +79,10 @@ The repeat used the same executable and workload, the Windows Balanced power pla
 
 The idle repeat met the 50% p99 objective across all admitted cases. Its single miss was 1,901.4 µs against a 1,451.2 µs deadline at 88.2 kHz/128 mono, so it fell short of the zero-miss objective. Direct Digital recorded zero misses in both runs. In both runs the median adjacent-clock estimate was 0 ns or 100 ns, consistent with the timer resolution.
 
+### Floating-point contraction experiment
+
+On the same workstation, two local Release builds added `-march=znver3` and differed only in `-ffp-contract=off` versus `fast`. Disassembly found 253 fused arithmetic instructions in the fast DSP archive and zero in the off archive. The run order was off, fast, fast, off with 2,000 callbacks per case. For each matrix case, p99 utilization was averaged across its two repetitions before comparing the flags. The median fast/off ratio was 1.028 for BBD (range 0.661–1.575) and 1.007 for direct Digital (range 0.728–1.524). The off runs observed 0 and 2 BBD misses, and the fast runs observed 15 and 0. Variation was larger than the median difference, so this workstation experiment established no repeatable timing advantage from contraction. The checked-in build retains `-ffp-contract=off` to preserve the frozen numerical regressions.
+
 ## Candidate support and remaining evidence
 
 | Sample rate | DSP result | Status |
