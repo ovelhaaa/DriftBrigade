@@ -252,3 +252,15 @@ target_compile_definitions(drift_bbd_product_envelope_production_timing PRIVATE
 if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(drift_bbd_product_envelope_production_timing PRIVATE -femulated-tls)
 endif()
+
+# Keep DSP and frozen references on the same unfused arithmetic, including
+# toolchains that target FMA by default. Apply to inline DSP in callers too.
+if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  get_property(drift_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(drift_target IN LISTS drift_targets)
+    get_target_property(drift_target_type ${drift_target} TYPE)
+    if(drift_target_type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY)$")
+      target_compile_options(${drift_target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
+    endif()
+  endforeach()
+endif()
