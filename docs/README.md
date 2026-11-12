@@ -9,6 +9,7 @@
 - M3 listening protocols — [M3.0](m3_0_listening_guide.md), [M3.1B.1](m3_1b_organic_voice_listening_guide.md). In generated packages, record scores before opening the answer key, manifest or technical reports.
 - Technical reports and historical listening record — [M3.0](m3_0_bbd_listening_bakeoff.md), [M3.1B.1](m3_1b_organic_voice_retest.md), [listening decisions](m3_1_listening_decisions.md). The project owner selected Wander and closed the comparison. PaperNarrowband and PhaseDrift remain research references.
 - M3.1 product architecture — [musical architecture](m3_1_musical_architecture.md), [implementation plan](m3_1_implementation_plan.md), [admission and fallback](m3_1c_bbd_product_admission.md). DigitalFractional/Wander/Gentle is the public configuration. Balanced1024 is experimental and still requires callback and DAW qualification.
+- M3.2 MVP Fast Track & Friends Beta — [M3.2 MVP report](m3_2_mvp_beta.md), [Friends Beta test guide](mvp_beta_test_guide.md). Freezes DigitalFractional/Wander/Gentle for the public beta, introduces the Motion Field UI and Quick Starts (`SUBTLE`, `WIDE`, `DRIFT`), and packages the Windows x64 VST3 + Standalone distribution.
 
 ## Validation
 
