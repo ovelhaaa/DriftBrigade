@@ -29,7 +29,7 @@ build-dsp/drift_bbd_listening_bakeoff --voice-retest output/m31b1-repeat
 python tools/verify_bbd_listening_bakeoff.py output/m31b1 --voice-retest --compare output/m31b1-repeat --original output/m30
 ```
 
-Open the packages in the [Listening Lab](../tools/listening-lab/README.md). GitHub Actions publishes the M1.1, M2 qualification and M3 listening bundles with repository-default retention. Build trees, WAVs and generated CSVs belong under ignored directories such as `build-dsp/` or `output/`.
+Open the packages in the [Listening Lab](../tools/listening-lab/README.md). GitHub Actions publishes the M1.1, M2 qualification and M3 listening bundles with repository-default retention, verified at 90 days on the consolidation workflow. Build trees, WAVs and generated CSVs belong under ignored directories such as `build-dsp/` or `output/`.
 
 ## M3.1D host qualification
 

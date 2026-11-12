@@ -27,11 +27,19 @@ The new CI timing job waits for the three-platform DSP matrix. The sanitizer job
 ## Lifecycle and compatibility
 
 - The DSP lifecycle test starts Digital, then prepares BBD at 44.1 → 48 → 88.2 kHz, falls back at 96 kHz and returns to 44.1 kHz. It checks exact block partition equality in mono and stereo, exact 96 kHz fallback equality against a direct Digital render, reset, finite output with high feedback and a two-second tail, resumption, and exact dry output at Mix 0 with finite float extremes.
-- The instrumented admission suite tests the same scene's simultaneous automation extrema, out-of-envelope and NaN/Inf updates, and compares output with a control engine that received only the valid tuples. It checks clock bounds, physical limits, hidden clamps, guards and finite voice state. The timing and JUCE processor tests check ordinary C++ allocations on the callback thread. They do not instrument OS allocators or the host wrapper.
+- At each admitted rate, the instrumented admission suite tests the same scene's simultaneous automation extrema, out-of-envelope and NaN/Inf updates, and compares output with a control engine that received only the valid tuples. It checks clock bounds, physical limits, hidden clamps, guards and finite voice state. The timing and JUCE processor tests check ordinary C++ allocations on the callback thread. They do not instrument OS allocators or the host wrapper.
 - The optional internal VST3 uses the admitted scene and a distinct bundle name, ID and class code. If the entire APVTS tuple is valid on prepare it starts from that tuple. Otherwise it starts from the scene and rejects invalid updates until a complete valid tuple arrives. The editor displays admission, fallback or unavailable status and snapshot rejection. The same policy applies to the internal fallback. There is no callback logging or runtime backend switch. The public target still uses the existing parameter IDs, defaults, schema, identity and Digital backend.
 - The JUCE host test loads a built VST3 bundle, switches mono/stereo routing while stopped, changes rates and maximum block size, renders variable blocks, exercises VST3 bypass when advertised, and compares a restored offline render to the corresponding normal-mode render. It uses JUCE's host API with synthetic buffers.
 
-On Windows, both VST3 bundles passed the JUCE loaded-host tests. Their generated VST3 manifests have different audio module and controller class IDs. The internal processor test confirmed admission status and fallback, state restoration, snapshot rejection and no ordinary C++ allocation on the processor callback. Windows Clang UBSan passed the host lifecycle and product admission tests. The Windows MinGW toolchain lacks the ASan runtime required for linking, so combined ASan/UBSan is covered by the Linux workflow.
+On Windows, both VST3 bundles passed the JUCE loaded-host tests. Their generated VST3 manifests have different audio module and controller class IDs. The internal processor test confirmed admission status and fallback, state restoration, snapshot rejection and no ordinary C++ allocation on the processor callback. Windows Clang UBSan passed the host lifecycle and product admission tests. The Windows MinGW toolchain lacks the ASan runtime required for linking. Combined ASan/UBSan passed in the Linux workflow.
+
+## REAPER 7.81 on Windows
+
+An isolated REAPER profile scanned and instantiated both VST3 variants. A ReaScript generated and saved stereo projects using the same three-second harmonic and transient fixture, Center 30 ms, Depth 60%, Mix 65% and Feedback at 45% of its public range. Each offline render reopened its project in a separate REAPER process. The renderer produced 24-bit stereo PCM at the requested rate. Internal-versus-public RMS differences were 0.015317 at 44.1 kHz, 0.015374 at 48 kHz and 0.015663 at 88.2 kHz. At 96 kHz the outputs were sample-identical, corroborating Digital fallback. The bypassed internal effect was sample-identical to the no-effect render at 48 kHz.
+
+A reopened internal project restored the four saved controls within `1e-5` in normalized units. A second 48 kHz render added simultaneous Depth, Mix and Feedback envelopes and differed from the fixed-control render by 0.022868 RMS. The automated project also played in REAPER with Dummy Audio at 48 kHz/128 and WASAPI at 48 kHz/512. The master fader was at zero during playback and track meters confirmed signal. Both short runs advanced the transport through 1.8 seconds and reported no change in the audio or media underrun timestamps. This check did not capture realtime audio for sample comparison to the offline render.
+
+The same stereo automation project then looped for 300.03 seconds at 48 kHz/512 using WASAPI, with 99 observed wraps and a track peak of 0.3712. REAPER's reported audio and media underrun timestamps stayed at zero. This is a transport and driver smoke test for one instance on this workstation. It does not supply per-callback deadlines.
 
 ## Workstation timing
 
@@ -83,6 +91,10 @@ The idle repeat met the 50% p99 objective across all admitted cases. Its single 
 
 On the same workstation, two local Release builds added `-march=znver3` and differed only in `-ffp-contract=off` versus `fast`. Disassembly found 253 fused arithmetic instructions in the fast DSP archive and zero in the off archive. The run order was off, fast, fast, off with 2,000 callbacks per case. For each matrix case, p99 utilization was averaged across its two repetitions before comparing the flags. The median fast/off ratio was 1.028 for BBD (range 0.661–1.575) and 1.007 for direct Digital (range 0.728–1.524). The off runs observed 0 and 2 BBD misses, and the fast runs observed 15 and 0. Variation was larger than the median difference, so this workstation experiment established no repeatable timing advantage from contraction. The checked-in build retains `-ffp-contract=off` to preserve the frozen numerical regressions.
 
+### Linux CI timing
+
+The GitHub Actions Linux runner used GNU 15.2.0 on an AMD EPYC 9V74 with four logical CPUs available. Across the same 96 cases it recorded zero misses, with a worst BBD p99 utilization of 19.75% at 88.2 kHz/16 stereo and a maximum utilization of 27.27% across admitted cases. The runner and full CSVs are identified by [the CI artifact](https://github.com/ovelhaaa/DriftBrigade/actions/runs/43300196909/artifacts/13981588219).
+
 ## Candidate support and remaining evidence
 
 | Sample rate | DSP result | Status |
@@ -91,4 +103,4 @@ On the same workstation, two local Release builds added `-march=znver3` and diff
 | 96 kHz | Digital fallback | Fallback coverage only |
 | Other rates | Admission rejects Balanced1024. Digital fallback requires a valid rate in the engine's Digital domain | Admission unit coverage, outside the timing matrix |
 
-These runs cover one admitted scene and one Windows workstation. The benchmark does not stress all legal BBD operating points near the physical clock ceiling. A dedicated audio-machine run and DAW playback, render, restore and automation checks remain necessary. No commercial DAW or hardware audio driver was used for these measurements.
+The DSP benchmarks cover one admitted scene. They do not stress all legal BBD operating points near the physical clock ceiling. The REAPER results cover stereo and one workstation. Other DAWs, mono in a DAW, realtime rates and buffers beyond the reported cases, and multi-instance sessions remain open. Dedicated audio-machine timing still needs to reproduce the p99 and zero-miss objectives.
