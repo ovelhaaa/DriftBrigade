@@ -1,59 +1,65 @@
-# M3.2 — MVP Fast Track: DSP Freeze, Interface Motion Field e Friends Beta
+# M3.2 / M3.2.1 — MVP Fast Track, Visual Identity Overhaul e Friends Beta
 
 ## 1. Escopo do MVP e Decisão de Produto (DSP Freeze)
 
-A etapa **M3.2** marca a transição do **DriftBrigade** da fase de pesquisa de DSP para a primeira versão candidata de produto (**Friends Beta — `v0.2.0-beta.1`**) voltada a testes reais em produções musicais.
+As etapas **M3.2** e **M3.2.1** marcam a transição do **DriftBrigade** da fase de pesquisa de DSP para a primeira versão candidata de produto (**Friends Beta — `v0.2.0-beta.1`**, versão numérica CMake/VST3 `0.2.0`) voltada a testes reais em produções musicais.
 
 ### Configuração Pública Congelada
 - **Backend de atraso:** `DigitalFractional` (interpolação cúbica Hermite de 4 pontos com margem de segurança, slew cap de `0.25 amostra/amostra` e bloqueio DC de `5 Hz` pós-tap de feedback).
 - **Modulador orgânico:** `Wander` (interpolação raised-cosine entre alvos aleatórios com fase contínua + portadora senoidal normalizada em variância).
 - **Banco multibanda:** `Gentle` (quatro bandas complementares com crossovers TPT de primeira ordem em `250 Hz`, `1 kHz` e `4 kHz`, reconstrução de latência zero).
-- **Parâmetros públicos:** Mantidos exatamente os 9 parâmetros (`motion`, `depth`, `center`, `chaos`, `coherence`, `dynamics`, `feedback`, `mix`, `width`), suas faixas, mapeamentos logarítmicos/lineares, valores iniciais, suavização de `50 ms`, esquema de estado XML (`schema=1`) e identidade VST3 (`audio.driftbrigade.m1` / `DrBg`).
+- **Parâmetros públicos:** Mantidos exatamente os 9 parâmetros (`motion`, `depth`, `center`, `chaos`, `coherence`, `dynamics`, `feedback`, `mix`, `width`), suas faixas internas, mapeamentos logarítmicos/lineares, valores iniciais, suavização de `50 ms`, esquema de estado XML (`schema=1`) e identidade VST3 (`audio.driftbrigade.m1` / `DrBg`).
 
-Nenhum arquivo de DSP (`Source/dsp/*`), especificação de parâmetros (`Source/params/*`) ou processamento de áudio (`PluginProcessor.cpp`) sofreu alteração sonora ou numérica. O backend experimental `Balanced1024 BBD` e o alvo de validação `DRIFT BRIGADE BBD HOST TEST` permanecem isolados na infraestrutura interna de qualificação, fora do pacote beta distribuído aos usuários.
+Nenhum arquivo de DSP (`Source/dsp/*`) ou especificação semântica de parâmetros (`Source/params/ParameterSpecs.h`) sofreu alteração sonora ou numérica. O backend experimental `Balanced1024 BBD` e o alvo de validação `DRIFT BRIGADE BBD HOST TEST` permanecem isolados na infraestrutura interna de qualificação, fora do pacote beta distribuído aos usuários.
 
 ---
 
-## 2. Direção de Arte e Arquitetura da Interface
+## 2. Direção de Arte e Arquitetura da Interface (M3.2.1 Overhaul)
 
-A interface foi reprojetada do zero em C++17/JUCE vetorial (`Source/ui/`) seguindo a direção estética **Industrial Contemporâneo + Tecnologia Musical + Instrumentação Digital Sofisticada**:
+Na **M3.2.1**, a interface foi refinada sob o conceito **Precision Instrument / Contemporary Analog Laboratory**, substituindo completamente o antigo esquema escuro ciano/âmbar por uma linguagem baseada em **Off-White + Grafite Neutro + Laranja** (com o laranja como única cor cromática de destaque):
 
-- **Paleta cromática:** Chassi em grafite profundo (`#0C1016`–`#111720`), painéis instrumentais em ardósia escura (`#151C26`), viewport rebaixado (`#090D12`), acentos principais em **ciano mineral** (`#38D4C8`) para coerência/canal esquerdo e **âmbar suave** (`#E5A44C`) para caráter/canal direito/marcadores de referência.
+### Paleta Definitiva (`drift::ui::Palette`)
+| Elemento | Hexadecimal | Função |
+|---|---|---|
+| **Chassi / Background Geral** | `#F0EDE6` | Off-white levemente quente; margens externas, cabeçalho, rodapé e canais de separação entre módulos. |
+| **Painéis Principais** | `#292B2D` | Grafite neutro (sem tendência azulada); estrutura do `MotionField`, alojamento dos `Quick Starts` e módulos `MOVEMENT`, `SPACE` e `CHARACTER`. |
+| **Interior dos Displays** | `#17191B` | Cinza quase preto; visor rebaixado do `MotionField` e visores numéricos dos controles. |
+| **Accent Principal (Único)** | `#F36B2B` | Laranja vibrante não fluorescente; curso ativo dos 9 knobs, trajetórias L/R, pontos de órbita, seletores ativos e detalhes de marca. |
+| **Texto sobre Off-White** | `#292B2D` | Tipografia principal do cabeçalho e módulos de fluxo de sinal no rodapé. |
+| **Texto sobre Grafite** | `#F3F0E9` | Tipografia principal nos módulos escuros, nomes dos controles e leituras numéricas. |
+| **Tons Secundários e Bordas** | `#595753` / `#BAB6AD` / `#3B3E42` / `#D4CFC3` | Cinzas estritamente neutros derivados da paleta, sem qualquer segunda cor cromática. |
+
 - **Dimensões e responsividade:** Projetada na dimensão padrão de **`960 × 600 px`**, com redimensionamento contínuo suportado entre **`760 × 520 px`** e **`1600 × 1000 px`** e suporte a fatores de escala de alta densidade (`125%`, `150%`, `200%`).
 
 ### Componentes Implementados (`Source/ui/`)
 | Componente | Arquivo | Responsabilidade |
 |---|---|---|
-| `DriftLookAndFeel` | `Source/ui/DriftLookAndFeel.h/.cpp` | Paleta técnica, tipografia, renderização vetorial dos knobs rotativos (escala de 21 divisões, marcador âmbar do valor default, arco ativo e corpo usinado), botões, tooltips e redimensionador. |
-| `DriftKnob` | `Source/ui/DriftKnob.h/.cpp` | Controle rotativo individual conectado ao `APVTS` via `SliderAttachment`, título, caixa numérica editável com unidade (`Hz`, `ms`, `%`), duplo clique para restaurar o default, ajuste fino (`Ctrl`/`Alt` + arraste) e tooltip musical. |
-| `ParameterSection` | `Source/ui/ParameterSection.h/.cpp` | Agrupamento visual em três baias temáticas: **MOVEMENT** (`Motion`, `Depth`, `Chaos`), **SPACE** (`Center`, `Coherence`, `Width`) e **CHARACTER** (`Dynamics`, `Feedback`, `Mix`). |
-| `MotionField` | `Source/ui/MotionField.h/.cpp` | Visualizador paramétrico central de 4 bandas estéreo e escopo de órbita/janela de atraso a 30 FPS. |
-| `QuickStartSelector` | `Source/ui/QuickStartSelector.h/.cpp` | Seletor superior para aplicar os três snapshots musicais (`SUBTLE`, `WIDE`, `DRIFT`) de forma compatível com automação do host. |
-| `DriftEditor` | `Source/PluginEditor.h/.cpp` | Composição principal, cabeçalho com emblema de 4 bandas, rodapé técnico de fluxo de sinal e ciclo de vida RAII seguro. |
+| `DriftLookAndFeel` | `Source/ui/DriftLookAndFeel.h/.cpp` | Paleta centralizada (`Palette`), tipografia, renderização vetorial dos knobs rotativos (escala de 21 divisões, marcador discreto do valor default, arco ativo laranja `#F36B2B` e corpo grafite), seletores de instrumento, tooltips e redimensionador. |
+| `DriftKnob` | `Source/ui/DriftKnob.h/.cpp` | Controle rotativo individual conectado ao `APVTS` via `SliderAttachment`, formatação e leitura na camada de apresentação (`0–100%`, `Feedback 0–65%`, `Hz` e `ms` com 2 casas decimais), duplo clique para restaurar o default, ajuste fino (`Ctrl`/`Alt` + arraste) e tooltip musical. |
+| `ParameterSection` | `Source/ui/ParameterSection.h/.cpp` | Três módulos em grafite `#292B2D` emoldurados pelo chassi `#F0EDE6`: **MOVEMENT** (`Motion`, `Depth`, `Chaos`), **SPACE** (`Center`, `Coherence`, `Width`) e **CHARACTER** (`Dynamics`, `Feedback`, `Mix`). |
+| `MotionField` | `Source/ui/MotionField.h/.cpp` | Visualizador paramétrico central de 4 bandas estéreo e instrumento de órbita/janela de atraso com sistema monocromático laranja, separação `LIVE / HOLD` e sample rate real do host. |
+| `QuickStartSelector` | `Source/ui/QuickStartSelector.h/.cpp` | Alojamento seletor de instrumento no cabeçalho para aplicar os três snapshots musicais (`SUBTLE`, `WIDE`, `DRIFT`) de forma compatível com automação do host. |
+| `DriftEditor` | `Source/PluginEditor.h/.cpp` | Composição principal em chassi `#F0EDE6`, cabeçalho com emblema de 4 bandas em grafite e laranja, rodapé técnico de arquitetura de sinal e ciclo de vida RAII seguro. |
 
 ---
 
-## 3. Comportamento do `MotionField` e Honestidade Visual
+## 3. Comportamento do `MotionField`, `LIVE / HOLD` e Sample Rate Real
 
 O `MotionField` é uma **visualização paramétrica honesta** do comportamento do modulador multibanda, operando sem depender de medição enganosa de espectro/LUFS e funcionando mesmo sem áudio na entrada:
 
-1. **Painel Principal (Esquerda — Trajetórias Estéreo de 4 Bandas):**
-   - Exibe as quatro bandas (`B1 LOW`, `B2 LO-MID`, `B3 HI-MID`, `B4 HIGH`) nos canais esquerdo (**ciano**) e direito (**âmbar**) usando a mesma lei matemática de interpolação `Wander`, taxas por banda (`0.91x, 1.037x, 1.083x, 0.967x`) e taxas estéreo (`1.113x, 0.943x, 1.057x, 0.887x`) do motor DSP.
-   - **Motion:** controla a velocidade de propagação temporal e a densidade de ciclos na janela.
-   - **Depth:** controla a amplitude vertical de excursão e atualiza o readout real de excursão em milissegundos (`EXCURSION +/- ms`) calculado por `depthSeconds(motion, depth)`.
-   - **Chaos:** transforma continuamente a forma das curvas entre senoides regulares (`0%`) e deriva orgânica `Wander` (`100%`).
-   - **Coherence:** aproxima ou separa o movimento e o espaçamento vertical entre as quatro bandas.
-   - **Width:** separa as trajetórias esquerda (ciano) e direita (âmbar) e preenche a fita estéreo intermediária.
-   - **Center:** desloca a referência temporal na barra logarítmica (`0.3 – 30 ms`).
-   - **Dynamics:** exibe o corredor paramétrico de sensibilidade dinâmica (`DYN %`).
-   - **Feedback:** projeta trilhas fantasma de eco recursivo e halos de ressonância (`FB %`).
-   - **Mix:** controla a opacidade entre o eixo de referência seco tracejado (`DRY REFERENCE` em `Mix = 0%`) e as trajetórias processadas.
-2. **Escopo de Órbita Estéreo e Janela de Atraso (Direita):**
-   - Mostra em 2D o posicionamento instantâneo `L/R` vs. deslocamento de atraso das 4 bandas e uma barra horizontal logarítmica (`0.3 – 30 ms`) com o marcador âmbar de `Center` e a faixa ciano de excursão ativa.
-3. **Thread-Safety e Desempenho:**
-   - Leitura de parâmetros exclusivamente via `ParameterReader` (`std::atomic<float>` lock-free).
-   - Zero chamadas gráficas ou alocações no callback de áudio.
-   - Buffer de coordenadas 100% pré-alocado (`std::array`), atualização limitada a `30 FPS` apenas na região do `MotionField`, pausa automática quando o editor está oculto (`!isShowing()`) e botão **LIVE / HOLD** para congelar a animação.
+1. **Sistema Monocromático Laranja e Código Gráfico L/R:**
+   - Exibe as quatro bandas (`B1 LOW`, `B2 LO-MID`, `B3 HI-MID`, `B4 HIGH`) diferenciadas por posição vertical, espessura de traço (`B1` mais encorpado a `B4` mais fino), opacidade gradual e etiquetas laterais.
+   - **Canal Esquerdo (`LEFT`):** Traço laranja `#F36B2B` **contínuo** com ponto frontal **sólido cheio** (`●─── LEFT`).
+   - **Canal Direito (`RIGHT`):** Traço laranja `#F36B2B` **tracejado/segmentado** com opacidade diferenciada e ponto frontal em **anel vazado** (`○- - RIGHT`).
+2. **Órbita Estéreo Minimalista e Janela de Atraso (`DELAY WINDOW`):**
+   - Retículo circular minimalista com arco indicador de `Width`, vetores radiais sutis e os 4 nós das bandas em laranja (com anéis concêntricos discretos de persistência para `Feedback`).
+   - Barra horizontal logarítmica (`0.3 – 30 ms`) com trilha neutra, intervalo previsto de excursão em laranja translúcido e cursor de alto contraste (`#F3F0E9` + `#F36B2B`) para o valor selecionado de `Center`.
+3. **Política `LIVE / HOLD` Desacoplada:**
+   - **LIVE:** Trajetórias animadas a 30 FPS, parâmetros e indicadores atualizados continuamente.
+   - **HOLD:** Trajetórias congeladas (sem avanço de fase e sem recomputação contínua das curvas), porém o polling leve mantém os parâmetros, o readout `CENTER / EST. EXCURSION`, a `DELAY WINDOW`, `DYN / FB`, o sample rate e o destaque dos `Quick Starts` atualizados em tempo real.
+4. **Excursão Paramétrica com Sample Rate Real do Host:**
+   - `DriftProcessor` publica de forma lock-free (`std::atomic<double>`) a taxa de amostragem efetiva preparada em `prepareToPlay` (com fallback seguro para `48 kHz` antes da preparação).
+   - O `MotionField` calcula o limite de excursão do modelo `DigitalFractional` usando `4.0 / effectiveSampleRate()` (testado em `44.1`, `48`, `88.2` e `96 kHz`) e identifica o valor explicitamente como `EST. EXCURSION`.
 
 ---
 
@@ -75,36 +81,17 @@ Os três Quick Starts aplicam snapshots nos 9 parâmetros públicos existentes u
 
 ---
 
-## 5. Validação Funcional e Visual Realizada
-
-1. **Testes de Regressão DSP e Qualificação:** Todas as suítes (`dsp_qualification`, `bbd_listening_numerical`, `bbd_engine_numerical`, `bbd_product_admission`, `bbd_host_lifecycle`, etc.) continuam passando sem alteração numérica.
-2. **Testes do Plugin e Host VST3 (`drift_plugin_tests` e `drift_vst3_host_tests`):**
-   - Verificação dos 9 knobs, unidades, tooltips e retorno ao default por duplo clique.
-   - Aplicação dos 3 Quick Starts, sincronização com os knobs, persistência via `getStateInformation`/`setStateInformation` e desmarcação automática ao editar manualmente qualquer controle.
-   - Resposta determinística e zero alocações no `MotionField::stepSimulation()` e no callback `processBlock()`.
-   - Abertura e fechamento repetidos do editor, renderização offline com automação simultânea nos 9 parâmetros, roteamento mono/estéreo/upmix e bypass VST3.
-3. **Inspeção Visual Automatizada (`--visual-suite`):**
-   - Capturas geradas a partir do executável real em `960×600` (padrão), `760×520` (mínimo), `1280×800` (ampliado), escalas DPI `125%`, `150%` e `200%`, controles em valores mínimos (`Mix 0%`), valores máximos e nos três Quick Starts (`SUBTLE`, `WIDE`, `DRIFT`).
-
----
-
-## 6. Como Gerar o Pacote Beta (Windows x64)
+## 5. Como Gerar a Suíte Visual e o Pacote Beta (Windows x64)
 
 ```sh
 cmake -S . -B build-plugin -DDRIFT_BUILD_VST3_HOST_TESTS=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build-plugin --config Release --parallel 4
 ctest --test-dir build-plugin -C Release --output-on-failure
+./build-plugin/drift_plugin_tests --visual-suite output/visual-suite
+python tools/verify_visual_suite.py output/visual-suite
 python tools/package_beta.py --build-dir build-plugin --output-dir output/beta --config Release --version 0.2.0-beta.1
 ```
 
-O script `tools/package_beta.py` valida que o plugin interno `DRIFT BRIGADE BBD HOST TEST` não está presente no diretório de artefatos e gera:
+O script `tools/package_beta.py` valida a consistência entre a versão numérica CMake (`0.2.0`) e a tag beta (`0.2.0-beta.1`), garante que o plugin interno `DRIFT BRIGADE BBD HOST TEST` não está presente e gera:
 - `output/beta/DriftBrigade-0.2.0-beta.1-win-x64/` (diretório completo)
 - `output/beta/DriftBrigade-0.2.0-beta.1-win-x64.zip` (pacote pronto para compartilhamento contendo `VST3/DRIFT BRIGADE.vst3`, `Standalone/DRIFT BRIGADE.exe`, `README_INSTALACAO.md`, `README_USO.md`, `BETA_TEST_GUIDE.md`, `CHANGELOG.md` e `VERSION.txt`).
-
----
-
-## 7. Limites Conhecidos e O Que Ficou Para Depois
-
-- **Assinatura Digital:** Os binários Windows desta beta privada não possuem certificado Authenticode comercial; essa condição está documentada no `README_INSTALACAO.md` sem recomendar desativar proteções do sistema.
-- **Atribuição JUCE:** Como o build utiliza a configuração padrão JUCE 7 sem licença comercial ativa no CMake, o selo "Made with JUCE" aparece no canto inferior direito; o layout reserva uma barra técnica inferior de `60 px` para garantir que nenhum controle ou valor numérico seja obstruído.
-- **Fora de escopo nesta versão (planejado para etapas futuras):** Sistema completo de gerenciamento/navegação de presets em arquivo, MIDI learn, medição de nível de áudio de entrada/saída na GUI, instalador `.msi`/`.exe` assinado e decisão final sobre exposição pública do modo BBD.

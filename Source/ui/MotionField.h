@@ -12,7 +12,8 @@ public:
     static constexpr std::size_t kNumBands = 4;
 
     explicit MotionField(juce::AudioProcessorValueTreeState& state,
-                         std::function<void()> onParametersChanged = {});
+                         std::function<void()> onParametersChanged = {},
+                         std::function<double()> sampleRateProvider = {});
     ~MotionField() override;
 
     void paint(juce::Graphics& g) override;
@@ -22,10 +23,17 @@ public:
     void setAnimationEnabled(bool enabled);
     bool isAnimationEnabled() const noexcept { return animationEnabled; }
 
-    // Synchronous evaluation for deterministic visual snapshots and tests
+    // Synchronous evaluation for deterministic visual snapshots and tests.
+    // Always polls parameters and sample rate; only advances trajectories when animationEnabled == true.
     void stepSimulation(double deltaSeconds = 1.0 / 30.0) noexcept;
 
+    // Lightweight parameter and sample-rate poll without advancing trajectory animation.
+    bool pollParameters() noexcept;
+
     const EngineParameters& currentParameters() const noexcept { return snapshot; }
+    double effectiveSampleRate() const noexcept { return currentSampleRate; }
+    double estimatedExcursionMs() const noexcept;
+
     float trajectorySample(std::size_t band, std::size_t channel, std::size_t pointIndex) const noexcept {
         return trajectories[channel][band][pointIndex];
     }
@@ -33,13 +41,16 @@ public:
 private:
     void timerCallback() override;
     void recomputeTrajectories() noexcept;
+    double querySampleRate() const noexcept;
 
     static double evaluateWander(std::uint32_t seed, double phaseCycles, double chaos) noexcept;
 
     ParameterReader reader;
     EngineParameters snapshot;
     std::function<void()> parameterChangeCallback;
+    std::function<double()> sampleRateCallback;
 
+    double currentSampleRate = 48000.0;
     double phaseCycles = 0.0;
     bool animationEnabled = true;
 

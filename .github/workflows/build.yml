@@ -68,6 +68,8 @@ jobs:
       - run: cmake -S . -B build -A x64 -DDRIFT_BUILD_VST3_HOST_TESTS=ON
       - run: cmake --build build --config Release --parallel 2
       - run: ctest --test-dir build -C Release --output-on-failure
+      - run: ./build/Release/drift_plugin_tests.exe --visual-suite output/visual-suite
+      - run: python tools/verify_visual_suite.py output/visual-suite
       - run: python tools/package_beta.py --build-dir build --output-dir output/beta --config Release --version 0.2.0-beta.1
       - uses: actions/upload-artifact@v4
         with:
@@ -75,7 +77,12 @@ jobs:
           path: build/DriftBrigade_artefacts/Release/
       - uses: actions/upload-artifact@v4
         with:
-          name: DriftBrigade-M3.2-Windows-x64-Beta
+          name: DriftBrigade-M3.2.1-Visual-Suite
+          path: output/visual-suite/*.png
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M3.2.1-Windows-x64-Beta
           path: output/beta/DriftBrigade-0.2.0-beta.1-win-x64.zip
           if-no-files-found: error
   internal-bbd-plugin:

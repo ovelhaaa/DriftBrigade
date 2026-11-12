@@ -2,6 +2,7 @@
 #include "ui/DriftLookAndFeel.h"
 #include "dsp/DepthMapping.h"
 #include "dsp/DriftEngine.h"
+#include <algorithm>
 #include <cmath>
 
 namespace drift::ui {
@@ -31,14 +32,18 @@ bool parametersDiffer(const EngineParameters& a, const EngineParameters& b) noex
 } // namespace
 
 MotionField::MotionField(juce::AudioProcessorValueTreeState& state,
-                         std::function<void()> onParametersChanged)
+                         std::function<void()> onParametersChanged,
+                         std::function<double()> sampleRateProvider)
     : reader(state),
       snapshot(reader.read()),
-      parameterChangeCallback(std::move(onParametersChanged)) {
+      parameterChangeCallback(std::move(onParametersChanged)),
+      sampleRateCallback(std::move(sampleRateProvider)),
+      currentSampleRate(querySampleRate()) {
     freezeButton.setButtonText("LIVE");
     freezeButton.setClickingTogglesState(true);
     freezeButton.setToggleState(true, juce::dontSendNotification);
-    freezeButton.setTooltip("Alterna entre animacao em tempo real (30 FPS) e visualizacao estatica.");
+    freezeButton.getProperties().set("isHoldButton", true);
+    freezeButton.setTooltip("Alterna entre animacao em tempo real (LIVE) e trajetoria congelada com indicadores ativos (HOLD).");
     freezeButton.onClick = [this] {
         setAnimationEnabled(freezeButton.getToggleState());
     };
@@ -52,20 +57,64 @@ MotionField::~MotionField() {
     stopTimer();
 }
 
+double MotionField::querySampleRate() const noexcept {
+    if (sampleRateCallback) {
+        const double sr = sampleRateCallback();
+        if (std::isfinite(sr) && sr > 0.0) {
+            return std::clamp(sr, 44100.0, 192000.0);
+        }
+    }
+    return 48000.0;
+}
+
+double MotionField::estimatedExcursionMs() const noexcept {
+    const double sr = (std::isfinite(currentSampleRate) && currentSampleRate > 0.0)
+        ? std::clamp(currentSampleRate, 44100.0, 192000.0)
+        : 48000.0;
+    const double motionHz = snapshot[Motion];
+    const double depthVal = snapshot[Depth];
+    const double centerMs = snapshot[Center];
+    const double minimumDelaySec = 4.0 / sr;
+    const double requestedExcursionSec = depthSeconds(motionHz, depthVal, true);
+    const double safetyMaxSec = std::max(0.0, (centerMs * 0.001 - minimumDelaySec) * 0.85
+                                         / DriftEngine::combinedModulationBound(OrganicVariant::Wander));
+    return std::min(requestedExcursionSec, safetyMaxSec) * 1000.0;
+}
+
+bool MotionField::pollParameters() noexcept {
+    const auto latest = reader.read();
+    const double latestSr = querySampleRate();
+    const bool paramChanged = parametersDiffer(snapshot, latest);
+    const bool srChanged = std::abs(currentSampleRate - latestSr) > 1e-3;
+
+    snapshot = latest;
+    currentSampleRate = latestSr;
+
+    if (paramChanged && parameterChangeCallback) {
+        parameterChangeCallback();
+    }
+    return paramChanged || srChanged;
+}
+
 void MotionField::setAnimationEnabled(bool enabled) {
     animationEnabled = enabled;
     freezeButton.setToggleState(enabled, juce::dontSendNotification);
     freezeButton.setButtonText(enabled ? "LIVE" : "HOLD");
-    if (enabled && isShowing())
-        startTimerHz(30);
-    else
+    pollParameters();
+    if (enabled) {
+        recomputeTrajectories();
+    }
+    if (isShowing()) {
+        startTimerHz(enabled ? 30 : 15);
+    } else {
         stopTimer();
+    }
     repaint();
 }
 
 void MotionField::visibilityChanged() {
-    if (isShowing() && animationEnabled)
-        startTimerHz(30);
+    if (isShowing())
+        startTimerHz(animationEnabled ? 30 : 15);
     else
         stopTimer();
 }
@@ -86,11 +135,7 @@ double MotionField::evaluateWander(std::uint32_t seed, double cycles, double cha
 }
 
 void MotionField::stepSimulation(double deltaSeconds) noexcept {
-    const auto latest = reader.read();
-    const bool changed = parametersDiffer(snapshot, latest);
-    snapshot = latest;
-    if (changed && parameterChangeCallback)
-        parameterChangeCallback();
+    pollParameters();
 
     if (animationEnabled) {
         // Perceptual visual scroll rate: smooth and readable from 0.05 Hz to 10 Hz at 30 FPS
@@ -99,15 +144,18 @@ void MotionField::stepSimulation(double deltaSeconds) noexcept {
         phaseCycles += deltaSeconds * visualCyclesPerSec;
         if (phaseCycles > 10000.0)
             phaseCycles -= 10000.0;
+        recomputeTrajectories();
     }
-
-    recomputeTrajectories();
 }
 
 void MotionField::timerCallback() {
     if (!isShowing()) return;
-    stepSimulation(1.0 / 30.0);
-    repaint();
+    if (animationEnabled) {
+        stepSimulation(1.0 / 30.0);
+        repaint();
+    } else if (pollParameters()) {
+        repaint();
+    }
 }
 
 void MotionField::recomputeTrajectories() noexcept {
@@ -182,96 +230,96 @@ void MotionField::recomputeTrajectories() noexcept {
 }
 
 void MotionField::resized() {
-    const int btnW = 50;
+    const int btnW = 54;
     const int btnH = 20;
-    freezeButton.setBounds(getWidth() - btnW - 10, 6, btnW, btnH);
+    freezeButton.setBounds(getWidth() - btnW - 10, 5, btnW, btnH);
 }
 
 void MotionField::paint(juce::Graphics& g) {
-    const auto outer = getLocalBounds().toFloat().reduced(1.0f);
-    constexpr float corner = 6.0f;
+    const auto outer = getLocalBounds().toFloat().reduced(0.5f);
+    constexpr float corner = 5.5f;
 
-    // 1. Viewport recessed frame
-    juce::ColourGradient bgGrad(Palette::viewportBg, outer.getX(), outer.getY(),
-                                Palette::viewportInner, outer.getX(), outer.getBottom(), false);
-    g.setGradientFill(bgGrad);
+    // 1. Outer graphite structural module (#292B2D)
+    g.setColour(Palette::panelBg);
     g.fillRoundedRectangle(outer, corner);
 
-    g.setColour(Palette::borderCrisp);
-    g.drawRoundedRectangle(outer, corner, 1.0f);
+    const float headerH = 30.0f;
+    const juce::Rectangle<float> headerRect(outer.getX() + 1.0f, outer.getY() + 1.0f,
+                                            outer.getWidth() - 2.0f, headerH);
+    g.setColour(Palette::panelRecessed);
+    g.fillRoundedRectangle(headerRect, corner);
+    g.fillRect(outer.getX() + 1.0f, outer.getY() + headerH - corner, outer.getWidth() - 2.0f, corner);
 
-    const float headerH = 28.0f;
-    const auto headerArea = outer.withHeight(headerH);
-    g.setColour(Palette::panelBg.withAlpha(0.75f));
-    g.fillRoundedRectangle(headerArea.getX() + 1.0f, headerArea.getY() + 1.0f,
-                           headerArea.getWidth() - 2.0f, headerH, corner);
-    g.setColour(Palette::borderSubtle);
+    g.setColour(Palette::panelBorder);
+    g.drawRoundedRectangle(outer, corner, 1.0f);
     g.drawHorizontalLine(static_cast<int>(outer.getY() + headerH), outer.getX() + 1.0f, outer.getRight() - 1.0f);
 
     // Header title + honest parametric tag
-    g.setColour(Palette::accentCyan);
-    g.fillRoundedRectangle(outer.getX() + 10.0f, outer.getY() + 8.0f, 3.0f, 12.0f, 1.5f);
+    g.setColour(Palette::accentOrange);
+    g.fillRoundedRectangle(outer.getX() + 10.0f, outer.getY() + 9.0f, 3.0f, 12.0f, 1.2f);
 
     g.setFont(DriftLookAndFeel::makeTechnicalFont(11.5f, true));
-    g.setColour(Palette::textPrimary);
+    g.setColour(Palette::textOnPanel);
     g.drawText("MOTION FIELD", static_cast<int>(outer.getX() + 18.0f), static_cast<int>(outer.getY()),
-               110, static_cast<int>(headerH), juce::Justification::centredLeft, false);
+               108, static_cast<int>(headerH), juce::Justification::centredLeft, false);
 
-    g.setFont(DriftLookAndFeel::makeTechnicalFont(10.0f, false));
-    g.setColour(Palette::textMuted);
-    const juce::String subHeader = getWidth() < 860 ? "4-BAND STEREO TRAJECTORY"
+    g.setFont(DriftLookAndFeel::makeTechnicalFont(9.8f, false));
+    g.setColour(Palette::textOnPanelMuted);
+    const juce::String subHeader = getWidth() < 860 ? "PARAMETRIC 4-BAND STEREO"
                                                     : "PARAMETRIC 4-BAND STEREO TRAJECTORY";
-    const int subHeaderW = getWidth() < 860 ? 155 : 240;
-    g.drawText(subHeader, static_cast<int>(outer.getX() + 122.0f),
+    const int subHeaderW = getWidth() < 860 ? 150 : 225;
+    g.drawText(subHeader, static_cast<int>(outer.getX() + 120.0f),
                static_cast<int>(outer.getY()), subHeaderW, static_cast<int>(headerH),
                juce::Justification::centredLeft, false);
 
-    // Live parametric readout summary in header (right side before LIVE button)
-    const double motionHz = snapshot[Motion];
-    const double depthVal = snapshot[Depth];
+    // Parametric readout summary in header (always updated in both LIVE and HOLD)
     const double centerMs = snapshot[Center];
     const double feedbackVal = snapshot[Feedback];
     const double mixVal = snapshot[Mix];
     const double widthVal = snapshot[Width];
     const double dynamicsVal = snapshot[Dynamics];
+    const double effectiveExcursionMs = estimatedExcursionMs();
 
-    const double requestedExcursionSec = depthSeconds(motionHz, depthVal, true);
-    const double safetyMaxSec = std::max(0.0, (centerMs * 0.001 - 4.0 / 48000.0) * 0.85
-                                         / DriftEngine::combinedModulationBound(OrganicVariant::Wander));
-    const double effectiveExcursionMs = std::min(requestedExcursionSec, safetyMaxSec) * 1000.0;
-
-    const juce::String telemetryText =
-        juce::String("CENTER ") + juce::String(centerMs, 2) + " ms  |  "
-        + "EXCURSION +/-" + juce::String(effectiveExcursionMs, 2) + " ms  |  "
-        + "L: CYAN  R: AMBER";
+    juce::String telemetryText =
+        juce::String("CENTER ") + juce::String(centerMs, 2) + " ms   |   "
+        + "EST. EXCURSION +/-" + juce::String(effectiveExcursionMs, 2) + " ms";
+    if (!animationEnabled) {
+        telemetryText = "HOLD (FROZEN TRACE)   |   " + telemetryText;
+    }
 
     g.setFont(DriftLookAndFeel::makeTechnicalFont(10.0f, true));
-    g.setColour(Palette::textSecondary);
-    const int telemetryLeft = static_cast<int>(outer.getX()) + 126 + subHeaderW;
-    const int telemetryRight = getWidth() - 68;
+    g.setColour(animationEnabled ? Palette::textOnPanelSecondary : Palette::accentOrange);
+    const int telemetryLeft = static_cast<int>(outer.getX()) + 124 + subHeaderW;
+    const int telemetryRight = getWidth() - 72;
     if (telemetryRight > telemetryLeft + 80) {
         g.drawFittedText(telemetryText, telemetryLeft, static_cast<int>(outer.getY()),
                          telemetryRight - telemetryLeft, static_cast<int>(headerH),
                          juce::Justification::centredRight, 1, 0.85f);
     }
 
-    // Split main canvas into Left (76% Scrolling Multiband Trajectory Field) & Right (24% Stereo & Delay Horizon Scope)
-    const auto bodyArea = outer.withTrimmedTop(headerH + 1.0f).reduced(8.0f, 6.0f);
-    if (bodyArea.getWidth() < 120.0f || bodyArea.getHeight() < 60.0f) return;
+    // 2. Recessed almost-black display interior (#17191B) inside the #292B2D module frame
+    const auto displayFrame = outer.withTrimmedTop(headerH).reduced(6.0f, 6.0f);
+    if (displayFrame.getWidth() < 120.0f || displayFrame.getHeight() < 60.0f) return;
 
-    const float scopeWidth = std::clamp(bodyArea.getWidth() * 0.235f, 155.0f, 235.0f);
-    const auto waveArea = bodyArea.withTrimmedRight(scopeWidth + 8.0f);
-    const auto scopeArea = bodyArea.withLeft(waveArea.getRight() + 8.0f);
+    g.setColour(Palette::displayBg);
+    g.fillRoundedRectangle(displayFrame, 4.0f);
+    g.setColour(Palette::panelBorder);
+    g.drawRoundedRectangle(displayFrame, 4.0f, 1.0f);
 
-    // Vertical separator between wave field and stereo/delay scope
-    g.setColour(Palette::borderSubtle);
-    g.drawVerticalLine(static_cast<int>(waveArea.getRight() + 4.0f), bodyArea.getY(), bodyArea.getBottom());
+    const auto bodyArea = displayFrame.reduced(6.0f, 4.0f);
+    const float scopeWidth = std::clamp(bodyArea.getWidth() * 0.24f, 160.0f, 240.0f);
+    const auto waveArea = bodyArea.withTrimmedRight(scopeWidth + 10.0f);
+    const auto scopeArea = bodyArea.withLeft(waveArea.getRight() + 10.0f);
+
+    // Vertical separator between wave field and stereo/delay instrument
+    g.setColour(Palette::gridAxis);
+    g.drawVerticalLine(static_cast<int>(waveArea.getRight() + 5.0f), displayFrame.getY() + 2.0f, displayFrame.getBottom() - 2.0f);
 
     // =========================================================================
-    // A. LEFT REGION: 4-BAND STEREO TRAJECTORY CANVAS
+    // A. LEFT REGION: 4-BAND STEREO TRAJECTORY CANVAS (Monochromatic Orange System)
     // =========================================================================
     {
-        // Technical graticule lines
+        // Neutral technical graticule lines
         g.setColour(Palette::gridLine);
         for (int row = 1; row <= 3; ++row) {
             if (row == 2) continue;
@@ -285,50 +333,39 @@ void MotionField::paint(juce::Graphics& g) {
         }
 
         const float midY = waveArea.getCentreY();
-        const float halfH = waveArea.getHeight() * 0.46f;
+        const float halfH = waveArea.getHeight() * 0.45f;
 
         // Dry reference horizon line at center (prominent when Mix is low)
-        const float dryAlpha = static_cast<float>(0.25 + 0.65 * (1.0 - mixVal));
-        g.setColour(Palette::textSecondary.withAlpha(dryAlpha));
-        const float dashLengths[2] = {4.0f, 4.0f};
+        const float dryAlpha = static_cast<float>(0.24 + 0.62 * (1.0 - mixVal));
+        g.setColour(Palette::textOnPanelMuted.withAlpha(dryAlpha));
+        const float refDashLengths[2] = {4.0f, 4.0f};
         g.drawDashedLine(juce::Line<float>(waveArea.getX(), midY, waveArea.getRight(), midY),
-                         dashLengths, 2, 1.2f);
+                         refDashLengths, 2, 1.1f);
 
-        // Dynamic sensitivity envelope corridor (honest parametric representation of Dynamics)
+        // Dynamic sensitivity envelope corridor (same orange family, subtle opacity)
         if (dynamicsVal > 0.01) {
-            const float dynBandHalfH = static_cast<float>(dynamicsVal) * halfH * 0.55f;
+            const float dynBandHalfH = static_cast<float>(dynamicsVal) * halfH * 0.54f;
             const juce::Rectangle<float> dynRect(waveArea.getX(), midY - dynBandHalfH,
                                                  waveArea.getWidth(), dynBandHalfH * 2.0f);
-            juce::ColourGradient dynGrad(Palette::accentCyan.withAlpha(0.0f), waveArea.getX(), midY - dynBandHalfH,
-                                         Palette::accentCyan.withAlpha(static_cast<float>(0.07 * dynamicsVal)),
-                                         waveArea.getX(), midY, false);
-            g.setGradientFill(dynGrad);
+            g.setColour(Palette::accentOrange.withAlpha(static_cast<float>(0.045 * dynamicsVal)));
             g.fillRect(dynRect);
 
-            g.setColour(Palette::accentCyan.withAlpha(static_cast<float>(0.16 * dynamicsVal)));
+            g.setColour(Palette::accentOrange.withAlpha(static_cast<float>(0.15 * dynamicsVal)));
             g.drawHorizontalLine(static_cast<int>(midY - dynBandHalfH), waveArea.getX(), waveArea.getRight());
             g.drawHorizontalLine(static_cast<int>(midY + dynBandHalfH), waveArea.getX(), waveArea.getRight());
         }
 
         // Wet prominence factor from Mix
-        const float wetAlpha = static_cast<float>(0.18 + 0.82 * mixVal);
+        const float wetAlpha = static_cast<float>(0.20 + 0.80 * mixVal);
         const float fbNorm = static_cast<float>(feedbackVal / 0.65);
 
-        // Band colors for Left (Mineral Cyan / Mint shades) and Right (Warm Amber / Gold shades)
-        const std::array<juce::Colour, kNumBands> leftColors {{
-            juce::Colour(0xff26b5aa),
-            juce::Colour(0xff38d4c8),
-            juce::Colour(0xff5ce0b8),
-            juce::Colour(0xff7ce8dc)
-        }};
-        const std::array<juce::Colour, kNumBands> rightColors {{
-            juce::Colour(0xffcc8838),
-            juce::Colour(0xffe5a44c),
-            juce::Colour(0xffedb868),
-            juce::Colour(0xfff4ca85)
-        }};
+        // Band differentiation within the single #F36B2B orange family:
+        // Low bands have slightly heavier stroke and higher opacity; High bands are finer.
+        constexpr std::array<float, kNumBands> bandAlphaScale {1.00f, 0.92f, 0.84f, 0.76f};
+        constexpr std::array<float, kNumBands> bandLeftStroke {2.20f, 1.95f, 1.72f, 1.52f};
+        constexpr std::array<float, kNumBands> bandRightStroke{1.65f, 1.50f, 1.35f, 1.22f};
 
-        // Draw feedback ghost trails first (when Feedback > 2%)
+        // 1. Draw feedback persistence trails first (when Feedback > 2%)
         if (fbNorm > 0.02f) {
             for (std::size_t b = 0; b < kNumBands; ++b) {
                 for (std::size_t ch = 0; ch < 2; ++ch) {
@@ -340,16 +377,18 @@ void MotionField::paint(juce::Graphics& g) {
                         if (i == 0) trailPath.startNewSubPath(px, py);
                         else trailPath.lineTo(px, py);
                     }
-                    const auto baseCol = (ch == 0) ? leftColors[b] : rightColors[b];
-                    g.setColour(baseCol.withAlpha(wetAlpha * fbNorm * 0.34f));
-                    g.strokePath(trailPath, juce::PathStrokeType(1.1f + fbNorm * 0.9f,
+                    const float chScale = (ch == 0) ? 0.30f : 0.20f;
+                    g.setColour(Palette::accentOrange.withAlpha(wetAlpha * bandAlphaScale[b] * fbNorm * chScale));
+                    g.strokePath(trailPath, juce::PathStrokeType(1.0f + fbNorm * 0.6f,
                                                                  juce::PathStrokeType::curved,
                                                                  juce::PathStrokeType::rounded));
                 }
             }
         }
 
-        // Draw primary Left and Right band trajectories + stereo ribbon fill between L and R
+        // 2. Draw primary Left (solid orange) and Right (segmented/dashed orange) band trajectories
+        const float rightDashLengths[2] = {5.5f, 3.5f};
+
         for (std::size_t b = 0; b < kNumBands; ++b) {
             juce::Path leftPath;
             juce::Path rightPath;
@@ -370,6 +409,7 @@ void MotionField::paint(juce::Graphics& g) {
                 }
             }
 
+            // Subtle stereo ribbon between L and R
             if (widthVal > 0.02) {
                 for (std::size_t i = kHistoryPoints; i > 0; --i) {
                     const std::size_t idx = i - 1;
@@ -378,97 +418,149 @@ void MotionField::paint(juce::Graphics& g) {
                     ribbonPath.lineTo(px, pyR);
                 }
                 ribbonPath.closeSubPath();
-                g.setColour(leftColors[b].interpolatedWith(rightColors[b], 0.5f)
-                                         .withAlpha(wetAlpha * static_cast<float>(0.04 + 0.06 * widthVal)));
+                g.setColour(Palette::accentOrange.withAlpha(wetAlpha * bandAlphaScale[b] * static_cast<float>(0.03 + 0.05 * widthVal)));
                 g.fillPath(ribbonPath);
             }
 
-            // Right channel trajectory (Amber)
+            // Right channel trajectory: segmented/dashed orange with distinct opacity
             if (widthVal > 0.005) {
-                g.setColour(rightColors[b].withAlpha(wetAlpha * 0.82f));
-                g.strokePath(rightPath, juce::PathStrokeType(1.5f, juce::PathStrokeType::curved,
-                                                             juce::PathStrokeType::rounded));
+                juce::Path dashedRight;
+                juce::PathStrokeType(bandRightStroke[b], juce::PathStrokeType::curved, juce::PathStrokeType::rounded)
+                    .createDashedStroke(dashedRight, rightPath, rightDashLengths, 2);
+                g.setColour(Palette::accentOrange.withAlpha(wetAlpha * bandAlphaScale[b] * 0.62f));
+                g.fillPath(dashedRight);
             }
 
-            // Left channel trajectory (Cyan)
-            g.setColour(leftColors[b].withAlpha(wetAlpha * 0.94f));
-            g.strokePath(leftPath, juce::PathStrokeType(1.75f, juce::PathStrokeType::curved,
+            // Left channel trajectory: solid orange with primary stroke weight
+            g.setColour(Palette::accentOrange.withAlpha(wetAlpha * bandAlphaScale[b] * 0.96f));
+            g.strokePath(leftPath, juce::PathStrokeType(bandLeftStroke[b], juce::PathStrokeType::curved,
                                                         juce::PathStrokeType::rounded));
 
-            // Leading head nodes at the right edge of the trajectory window
-            const float headX = waveArea.getRight() - 2.0f;
+            // Leading head nodes at the right edge of the trajectory window:
+            // Left = solid filled circle, Right = hollow ring
+            const float headX = waveArea.getRight() - 3.5f;
             const float headYL = midY - trajectories[0][b][kHistoryPoints - 1] * halfH;
             const float headYR = midY - trajectories[1][b][kHistoryPoints - 1] * halfH;
 
             if (widthVal > 0.01) {
-                g.setColour(rightColors[b].withAlpha(wetAlpha * 0.9f));
-                g.fillEllipse(headX - 3.0f, headYR - 3.0f, 6.0f, 6.0f);
+                g.setColour(Palette::displayBg);
+                g.fillEllipse(headX - 3.2f, headYR - 3.2f, 6.4f, 6.4f);
+                g.setColour(Palette::accentOrange.withAlpha(wetAlpha * bandAlphaScale[b] * 0.85f));
+                g.drawEllipse(headX - 3.2f, headYR - 3.2f, 6.4f, 6.4f, 1.4f);
             }
-            g.setColour(leftColors[b].withAlpha(wetAlpha));
+            g.setColour(Palette::accentOrange.withAlpha(wetAlpha * bandAlphaScale[b]));
             g.fillEllipse(headX - 3.4f, headYL - 3.4f, 6.8f, 6.8f);
         }
 
-        // Left-margin band labels with dark pill backdrop & Mix=0 indicator
+        // Left-margin band labels with dark tag backdrop + orange index bar
         g.setFont(DriftLookAndFeel::makeTechnicalFont(9.0f, true));
         for (std::size_t b = 0; b < kNumBands; ++b) {
             const float labelY = waveArea.getY() + 4.0f + static_cast<float>(3 - b) * (waveArea.getHeight() - 20.0f) / 3.0f;
-            const juce::Rectangle<float> tagRect(waveArea.getX() + 4.0f, labelY, 64.0f, 14.0f);
-            g.setColour(Palette::viewportBg.withAlpha(0.84f));
-            g.fillRoundedRectangle(tagRect, 3.0f);
-            g.setColour(leftColors[b].withAlpha(0.88f));
-            g.drawText(kBandNames[b], tagRect.reduced(4.0f, 0.0f).toNearestInt(),
+            const juce::Rectangle<float> tagRect(waveArea.getX() + 4.0f, labelY, 66.0f, 14.0f);
+            g.setColour(Palette::panelRecessed.withAlpha(0.90f));
+            g.fillRoundedRectangle(tagRect, 2.5f);
+            g.setColour(Palette::panelBorder);
+            g.drawRoundedRectangle(tagRect, 2.5f, 0.8f);
+
+            g.setColour(Palette::accentOrange.withAlpha(bandAlphaScale[b]));
+            g.fillRect(tagRect.getX() + 2.0f, tagRect.getY() + 3.0f, 2.0f, tagRect.getHeight() - 6.0f);
+
+            g.setColour(Palette::textOnPanelSecondary);
+            g.drawText(kBandNames[b], tagRect.withTrimmedLeft(6.0f).toNearestInt(),
                        juce::Justification::centredLeft, false);
         }
 
+        // Graphical L / R channel coding legend pill in top-right of wave canvas
+        {
+            const float legW = 148.0f;
+            const float legH = 16.0f;
+            const juce::Rectangle<float> legRect(waveArea.getRight() - legW - 6.0f, waveArea.getY() + 4.0f, legW, legH);
+            g.setColour(Palette::panelRecessed.withAlpha(0.92f));
+            g.fillRoundedRectangle(legRect, 3.0f);
+            g.setColour(Palette::panelBorder);
+            g.drawRoundedRectangle(legRect, 3.0f, 0.8f);
+
+            const float cy = legRect.getCentreY();
+            // L: solid line + filled dot
+            g.setColour(Palette::accentOrange);
+            g.drawLine(legRect.getX() + 8.0f, cy, legRect.getX() + 24.0f, cy, 2.0f);
+            g.fillEllipse(legRect.getX() + 24.0f, cy - 2.6f, 5.2f, 5.2f);
+            g.setFont(DriftLookAndFeel::makeTechnicalFont(9.0f, true));
+            g.setColour(Palette::textOnPanel);
+            g.drawText("LEFT", static_cast<int>(legRect.getX() + 33.0f), static_cast<int>(legRect.getY()),
+                       34, static_cast<int>(legH), juce::Justification::centredLeft, false);
+
+            // R: dashed line + hollow dot
+            g.setColour(Palette::accentOrange.withAlpha(0.75f));
+            const float rDash[2] = {3.5f, 2.5f};
+            g.drawDashedLine(juce::Line<float>(legRect.getX() + 74.0f, cy, legRect.getX() + 92.0f, cy), rDash, 2, 1.4f);
+            g.setColour(Palette::displayBg);
+            g.fillEllipse(legRect.getX() + 92.0f, cy - 2.6f, 5.2f, 5.2f);
+            g.setColour(Palette::accentOrange.withAlpha(0.85f));
+            g.drawEllipse(legRect.getX() + 92.0f, cy - 2.6f, 5.2f, 5.2f, 1.3f);
+            g.setColour(Palette::textOnPanelSecondary);
+            g.drawText("RIGHT", static_cast<int>(legRect.getX() + 101.0f), static_cast<int>(legRect.getY()),
+                       42, static_cast<int>(legH), juce::Justification::centredLeft, false);
+        }
+
         if (mixVal < 0.01) {
-            g.setColour(Palette::panelElevated.withAlpha(0.88f));
-            const juce::Rectangle<float> dryBadge(waveArea.getCentreX() - 68.0f, midY - 11.0f, 136.0f, 22.0f);
+            g.setColour(Palette::panelBg.withAlpha(0.94f));
+            const juce::Rectangle<float> dryBadge(waveArea.getCentreX() - 72.0f, midY - 11.0f, 144.0f, 22.0f);
             g.fillRoundedRectangle(dryBadge, 4.0f);
-            g.setColour(Palette::borderCrisp);
+            g.setColour(Palette::accentOrange);
             g.drawRoundedRectangle(dryBadge, 4.0f, 1.0f);
-            g.setColour(Palette::textPrimary);
+            g.setColour(Palette::textOnPanel);
             g.setFont(DriftLookAndFeel::makeTechnicalFont(10.0f, true));
             g.drawText("MIX 0% (DRY REFERENCE)", dryBadge.toNearestInt(), juce::Justification::centred, false);
         }
     }
 
     // =========================================================================
-    // B. RIGHT REGION: STEREO BAND ORBIT + DELAY HORIZON BAR
+    // B. RIGHT REGION: MINIMALIST STEREO ORBIT + DELAY WINDOW
     // =========================================================================
     {
-        const float meterBarH = 38.0f;
+        const float meterBarH = 42.0f;
         const auto radarArea = scopeArea.withTrimmedBottom(meterBarH + 4.0f);
         const auto delayBarArea = scopeArea.withTop(radarArea.getBottom() + 4.0f);
 
-        // 1. 2D Stereo Band Orbit Scope
-        const float radarRadius = std::min(radarArea.getWidth(), radarArea.getHeight()) * 0.42f;
-        const auto radarCentre = radarArea.getCentre();
+        // 1. Minimalist Stereo Orbit Instrument
+        g.setFont(DriftLookAndFeel::makeTechnicalFont(8.8f, true));
+        g.setColour(Palette::textOnPanelMuted);
+        g.drawText("STEREO ORBIT", static_cast<int>(radarArea.getX()), static_cast<int>(radarArea.getY()),
+                   static_cast<int>(radarArea.getWidth()), 11, juce::Justification::centred, false);
 
-        g.setColour(Palette::gridLine);
+        const auto orbitBounds = radarArea.withTrimmedTop(11.0f);
+        const float radarRadius = std::min(orbitBounds.getWidth(), orbitBounds.getHeight()) * 0.43f;
+        const auto radarCentre = orbitBounds.getCentre();
+
+        g.setColour(Palette::gridAxis);
         g.drawEllipse(radarCentre.x - radarRadius, radarCentre.y - radarRadius,
                       radarRadius * 2.0f, radarRadius * 2.0f, 1.0f);
-        g.drawEllipse(radarCentre.x - radarRadius * 0.55f, radarCentre.y - radarRadius * 0.55f,
-                      radarRadius * 1.1f, radarRadius * 1.1f, 1.0f);
+        g.setColour(Palette::gridLine);
+        g.drawEllipse(radarCentre.x - radarRadius * 0.52f, radarCentre.y - radarRadius * 0.52f,
+                      radarRadius * 1.04f, radarRadius * 1.04f, 1.0f);
         g.drawHorizontalLine(static_cast<int>(radarCentre.y), radarCentre.x - radarRadius, radarCentre.x + radarRadius);
         g.drawVerticalLine(static_cast<int>(radarCentre.x), radarCentre.y - radarRadius, radarCentre.y + radarRadius);
 
-        // Stereo width sector cone
-        const float spreadAngle = static_cast<float>(0.08 + 0.72 * widthVal);
-        juce::Path widthCone;
-        widthCone.addPieSegment(radarCentre.x - radarRadius, radarCentre.y - radarRadius,
-                                radarRadius * 2.0f, radarRadius * 2.0f,
-                                -spreadAngle, spreadAngle, 0.1f);
-        g.setColour(Palette::accentCyan.withAlpha(0.08f));
-        g.fillPath(widthCone);
+        // Minimalist stereo width rim arc (top of reticle)
+        const float spreadAngle = static_cast<float>(0.06 + 0.72 * widthVal);
+        if (widthVal > 0.01) {
+            juce::Path widthArc;
+            widthArc.addCentredArc(radarCentre.x, radarCentre.y, radarRadius, radarRadius,
+                                   0.0f, -spreadAngle, spreadAngle, true);
+            g.setColour(Palette::accentOrange.withAlpha(0.55f));
+            g.strokePath(widthArc, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved,
+                                                        juce::PathStrokeType::rounded));
+        }
 
         g.setFont(DriftLookAndFeel::makeTechnicalFont(9.0f, true));
-        g.setColour(Palette::textMuted);
+        g.setColour(Palette::textOnPanelSecondary);
         g.drawText("L", static_cast<int>(radarCentre.x - radarRadius - 14.0f), static_cast<int>(radarCentre.y - 6.0f),
                    12, 12, juce::Justification::centred, false);
         g.drawText("R", static_cast<int>(radarCentre.x + radarRadius + 2.0f), static_cast<int>(radarCentre.y - 6.0f),
                    12, 12, juce::Justification::centred, false);
 
-        // Plot the 4 band stereo locus nodes
+        // Plot the 4 band stereo locus nodes in orange
         for (std::size_t b = 0; b < kNumBands; ++b) {
             const float yL = trajectories[0][b][kHistoryPoints - 1];
             const float yR = trajectories[1][b][kHistoryPoints - 1];
@@ -477,58 +569,78 @@ void MotionField::paint(juce::Graphics& g) {
             const float stereoSpread = rawDiff * 1.45f + bandSign * static_cast<float>(widthVal) * 0.28f;
             const float avgMod = 0.5f * (yL + yR);
 
-            const float nx = radarCentre.x + std::clamp(stereoSpread, -0.92f, 0.92f) * radarRadius;
-            const float ny = radarCentre.y - std::clamp(avgMod, -0.92f, 0.92f) * radarRadius;
+            const float nx = radarCentre.x + std::clamp(stereoSpread, -0.90f, 0.90f) * radarRadius;
+            const float ny = radarCentre.y - std::clamp(avgMod, -0.90f, 0.90f) * radarRadius;
 
-            // Feedback resonance halo around each band node
-            const float fbHalo = static_cast<float>(feedbackVal / 0.65) * 7.5f;
-            if (fbHalo > 0.5f) {
-                g.setColour(Palette::accentAmber.withAlpha(0.24f));
-                g.drawEllipse(nx - 3.5f - fbHalo, ny - 3.5f - fbHalo,
-                              (3.5f + fbHalo) * 2.0f, (3.5f + fbHalo) * 2.0f, 1.1f);
+            // Subtle vector line from origin to node
+            g.setColour(Palette::accentOrange.withAlpha(0.22f));
+            g.drawLine(radarCentre.x, radarCentre.y, nx, ny, 1.0f);
+
+            // Discreet feedback persistence ring in the same orange family
+            const float fbRing = static_cast<float>(feedbackVal / 0.65) * 4.5f;
+            if (fbRing > 0.4f) {
+                g.setColour(Palette::accentOrange.withAlpha(0.28f));
+                g.drawEllipse(nx - 3.0f - fbRing, ny - 3.0f - fbRing,
+                              (3.0f + fbRing) * 2.0f, (3.0f + fbRing) * 2.0f, 1.0f);
             }
 
-            g.setColour(Palette::accentCyanBright);
-            g.fillEllipse(nx - 3.2f, ny - 3.2f, 6.4f, 6.4f);
+            const float nodeR = 3.2f - static_cast<float>(b) * 0.2f;
+            g.setColour(Palette::accentOrange);
+            g.fillEllipse(nx - nodeR, ny - nodeR, nodeR * 2.0f, nodeR * 2.0f);
         }
 
-        // 2. Delay Horizon Bar (0.3 ms .. 30 ms logarithmic scale)
-        g.setFont(DriftLookAndFeel::makeTechnicalFont(9.0f, true));
-        g.setColour(Palette::textMuted);
+        // 2. Delay Window Bar (0.3 ms .. 30 ms logarithmic scale)
+        g.setFont(DriftLookAndFeel::makeTechnicalFont(8.8f, true));
+        g.setColour(Palette::textOnPanelSecondary);
         g.drawText("DELAY WINDOW (0.3 - 30 ms)", static_cast<int>(delayBarArea.getX()),
                    static_cast<int>(delayBarArea.getY()), static_cast<int>(delayBarArea.getWidth()), 12,
                    juce::Justification::centredLeft, false);
 
-        const juce::Rectangle<float> barTrack(delayBarArea.getX(), delayBarArea.getY() + 15.0f,
-                                              delayBarArea.getWidth(), 8.0f);
-        g.setColour(Palette::knobTrack);
+        const juce::Rectangle<float> barTrack(delayBarArea.getX(), delayBarArea.getY() + 14.0f,
+                                              delayBarArea.getWidth(), 9.0f);
+        g.setColour(Palette::panelRecessed);
         g.fillRoundedRectangle(barTrack, 3.0f);
-        g.setColour(Palette::borderSubtle);
+        g.setColour(Palette::panelBorder);
         g.drawRoundedRectangle(barTrack, 3.0f, 1.0f);
 
+        // Reference scale ticks on the track (0.3 ms, 3.0 ms, 30.0 ms)
+        g.setColour(Palette::gridAxis);
+        const float midScaleX = barTrack.getX() + 0.5f * barTrack.getWidth();
+        g.drawVerticalLine(static_cast<int>(midScaleX), barTrack.getY() + 1.0f, barTrack.getBottom() - 1.0f);
+
         const float centerLogNorm = static_cast<float>(std::log(centerMs / 0.3) / std::log(30.0 / 0.3));
-        const float lowMs = std::clamp(centerMs - effectiveExcursionMs * 1.732, 0.3, 30.0);
-        const float highMs = std::clamp(centerMs + effectiveExcursionMs * 1.732, 0.3, 30.0);
+        const double maxModBound = DriftEngine::combinedModulationBound(OrganicVariant::Wander);
+        const double lowMs = std::clamp(centerMs - effectiveExcursionMs * maxModBound, 0.3, 30.0);
+        const double highMs = std::clamp(centerMs + effectiveExcursionMs * maxModBound, 0.3, 30.0);
         const float lowNorm = static_cast<float>(std::log(lowMs / 0.3) / std::log(30.0 / 0.3));
         const float highNorm = static_cast<float>(std::log(highMs / 0.3) / std::log(30.0 / 0.3));
 
         const float spanX1 = barTrack.getX() + lowNorm * barTrack.getWidth();
         const float spanX2 = barTrack.getX() + highNorm * barTrack.getWidth();
-        g.setColour(Palette::accentCyan.withAlpha(0.45f));
-        g.fillRoundedRectangle(spanX1, barTrack.getY() + 1.0f,
-                               std::max(3.0f, spanX2 - spanX1), barTrack.getHeight() - 2.0f, 2.0f);
+        const float spanW = std::max(3.0f, spanX2 - spanX1);
 
+        // Predicted excursion interval in translucent orange with crisp orange boundary ticks
+        g.setColour(Palette::accentOrange.withAlpha(0.38f));
+        g.fillRoundedRectangle(spanX1, barTrack.getY() + 1.0f, spanW, barTrack.getHeight() - 2.0f, 2.0f);
+        g.setColour(Palette::accentOrange.withAlpha(0.85f));
+        g.drawVerticalLine(static_cast<int>(spanX1), barTrack.getY() + 1.0f, barTrack.getBottom() - 1.0f);
+        g.drawVerticalLine(static_cast<int>(spanX1 + spanW), barTrack.getY() + 1.0f, barTrack.getBottom() - 1.0f);
+
+        // Selected Center marker: high-contrast light graphite/off-white needle with orange cap
         const float centerX = barTrack.getX() + centerLogNorm * barTrack.getWidth();
-        g.setColour(Palette::accentAmber);
-        g.fillRoundedRectangle(centerX - 1.5f, barTrack.getY() - 2.0f, 3.0f, barTrack.getHeight() + 4.0f, 1.5f);
+        g.setColour(Palette::accentOrange);
+        g.fillRoundedRectangle(centerX - 2.5f, barTrack.getY() - 2.5f, 5.0f, barTrack.getHeight() + 5.0f, 1.5f);
+        g.setColour(Palette::textOnPanel);
+        g.fillRect(centerX - 1.0f, barTrack.getY() - 1.5f, 2.0f, barTrack.getHeight() + 3.0f);
 
-        // Dynamics & Feedback micro status row below bar
-        g.setFont(DriftLookAndFeel::makeTechnicalFont(9.0f, false));
-        g.setColour(Palette::textSecondary);
-        const juce::String dynFbText = "DYN " + juce::String( static_cast<int>( std::round(dynamicsVal * 100.0))) + "%  |  FB "
-                                     + juce::String(static_cast<int>(std::round(feedbackVal * 100.0))) + "%";
-        g.drawText(dynFbText, static_cast<int>(delayBarArea.getX()), static_cast<int>(barTrack.getBottom() + 2.0f),
-                   static_cast<int>(delayBarArea.getWidth()), 12, juce::Justification::centred, false);
+        // Dynamics, Feedback & Sample Rate micro status row below bar
+        g.setFont(DriftLookAndFeel::makeTechnicalFont(8.8f, true));
+        g.setColour(Palette::textOnPanelMuted);
+        const juce::String srKhz = juce::String(currentSampleRate * 0.001, 1) + "k";
+        const juce::String dynFbText = "DYN " + juce::String(static_cast<int>(std::round(dynamicsVal * 100.0))) + "%  |  FB "
+                                     + juce::String(static_cast<int>(std::round(feedbackVal * 100.0))) + "%  |  " + srKhz;
+        g.drawText(dynFbText, static_cast<int>(delayBarArea.getX()), static_cast<int>(barTrack.getBottom() + 3.0f),
+                   static_cast<int>(delayBarArea.getWidth()), 13, juce::Justification::centred, false);
     }
 }
 

@@ -1,5 +1,8 @@
 #include "ui/DriftKnob.h"
 #include "ui/DriftLookAndFeel.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace drift::ui {
 
@@ -36,7 +39,7 @@ DriftKnob::DriftKnob(juce::AudioProcessorValueTreeState& state, Param param, int
 
     titleLabel.setText(juce::String(spec.name).toUpperCase(), juce::dontSendNotification);
     titleLabel.setJustificationType(juce::Justification::centred);
-    titleLabel.setColour(juce::Label::textColourId, Palette::textSecondary);
+    titleLabel.setColour(juce::Label::textColourId, Palette::textOnPanel);
     titleLabel.setInterceptsMouseClicks(false, false);
     addAndMakeVisible(titleLabel);
 
@@ -56,23 +59,49 @@ DriftKnob::DriftKnob(juce::AudioProcessorValueTreeState& state, Param param, int
     addAndMakeVisible(slider);
     attachment = std::make_unique<Attachment>(state, spec.id, slider);
     slider.setDoubleClickReturnValue(true, static_cast<double>(spec.initial));
+
+    // Presentation-layer formatting and parsing:
+    // Keep internal APVTS/DSP ranges intact while presenting percentages (0..1 -> 0..100%, 0..0.65 -> 0..65%)
+    // with clean integer rounding and 2-decimal precision for Hz / ms.
+    slider.textFromValueFunction = [spec](double value) -> juce::String {
+        if (spec.logarithmic) {
+            return juce::String(value, 2);
+        }
+        return juce::String(juce::roundToInt(value * 100.0));
+    };
+
+    slider.valueFromTextFunction = [spec](const juce::String& text) -> double {
+        juce::String cleaned = text.trim().replaceCharacter(',', '.');
+        const juce::String unitStr(spec.unit);
+        if (cleaned.endsWithIgnoreCase(unitStr)) {
+            cleaned = cleaned.dropLastCharacters(unitStr.length()).trim();
+        }
+        while (cleaned.startsWithChar('+')) {
+            cleaned = cleaned.substring(1).trimStart();
+        }
+        const double parsed = cleaned.initialSectionContainingOnly("0123456789.-").getDoubleValue();
+        const double internalValue = spec.logarithmic ? parsed : (parsed * 0.01);
+        return std::clamp(internalValue, static_cast<double>(spec.minimum), static_cast<double>(spec.maximum));
+    };
+
+    slider.updateText();
 }
 
 void DriftKnob::paint(juce::Graphics& g) {
     const auto bounds = getLocalBounds().toFloat().reduced(2.0f, 1.0f);
     if (slider.isMouseOverOrDragging()) {
-        g.setColour(Palette::panelElevated.withAlpha(0.32f));
-        g.fillRoundedRectangle(bounds, 5.0f);
+        g.setColour(Palette::panelElevated.withAlpha(0.45f));
+        g.fillRoundedRectangle(bounds, 4.5f);
     }
 }
 
 void DriftKnob::resized() {
     auto area = getLocalBounds().reduced(2);
-    const int labelH = std::clamp( static_cast<int>(area.getHeight() * 0.14f), 15, 22);
-    const int textBoxH = std::clamp(static_cast<int>(area.getHeight() * 0.14f), 17, 22);
+    const int labelH = std::clamp(static_cast<int>(area.getHeight() * 0.145f), 15, 22);
+    const int textBoxH = std::clamp(static_cast<int>(area.getHeight() * 0.145f), 17, 22);
     const int textBoxW = std::clamp(area.getWidth() - 8, 54, 88);
 
-    titleLabel.setFont(DriftLookAndFeel::makeTechnicalFont(std::clamp(labelH * 0.64f, 10.0f, 12.5f), true));
+    titleLabel.setFont(DriftLookAndFeel::makeTechnicalFont(std::clamp(labelH * 0.65f, 10.0f, 12.5f), true));
     titleLabel.setBounds(area.removeFromTop(labelH));
 
     slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, textBoxW, textBoxH);
