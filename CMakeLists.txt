@@ -4,8 +4,17 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(DRIFT_PRODUCT_NAME "DRIFT BRIGADE" CACHE STRING "Provisional product name")
-configure_file(Source/ProductConfig.h.in generated/ProductConfig.h @ONLY)
 option(DRIFT_BUILD_PLUGIN "Build JUCE VST3 and Standalone" ON)
+option(DRIFT_INTERNAL_BBD_HOST_TEST "Build the isolated internal BBD validation plugin" OFF)
+option(DRIFT_BUILD_VST3_HOST_TESTS "Build a headless JUCE VST3 bundle smoke test" OFF)
+set(drift_plugin_bundle "audio.driftbrigade.m1")
+set(drift_plugin_code DrBg)
+if(DRIFT_INTERNAL_BBD_HOST_TEST)
+  set(DRIFT_PRODUCT_NAME "DRIFT BRIGADE BBD HOST TEST")
+  set(drift_plugin_bundle "audio.driftbrigade.bbdhosttest")
+  set(drift_plugin_code DbHt)
+endif()
+configure_file(Source/ProductConfig.h.in generated/ProductConfig.h @ONLY)
 option(DRIFT_SANITIZE "Enable address/undefined sanitizers (Clang/GCC)" OFF)
 add_library(drift_dsp Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
 target_include_directories(drift_dsp PUBLIC Source "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -82,17 +91,33 @@ if(DRIFT_BUILD_PLUGIN)
   # JUCE 7.0.12 retains MinGW support for this workspace's native toolchain.
   FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.git GIT_TAG 4f43011b96eb0636104cb3e433894cda98243626)
   FetchContent_MakeAvailable(JUCE)
-  juce_add_plugin(DriftBrigade COMPANY_NAME "Drift Audio" BUNDLE_ID "audio.driftbrigade.m1"
-    PLUGIN_MANUFACTURER_CODE Drft PLUGIN_CODE DrBg FORMATS VST3 Standalone
+  juce_add_plugin(DriftBrigade COMPANY_NAME "Drift Audio" BUNDLE_ID "${drift_plugin_bundle}"
+    PLUGIN_MANUFACTURER_CODE Drft PLUGIN_CODE ${drift_plugin_code} FORMATS VST3 Standalone
     PRODUCT_NAME "${DRIFT_PRODUCT_NAME}" IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE IS_MIDI_EFFECT FALSE COPY_PLUGIN_AFTER_BUILD FALSE)
   target_sources(DriftBrigade PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/params/Parameters.cpp)
   target_include_directories(DriftBrigade PUBLIC Source "${CMAKE_CURRENT_BINARY_DIR}/generated")
   target_compile_definitions(DriftBrigade PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+  if(DRIFT_INTERNAL_BBD_HOST_TEST)
+    target_compile_definitions(DriftBrigade PUBLIC DRIFT_INTERNAL_BBD_HOST_TEST=1)
+  endif()
   target_link_libraries(DriftBrigade PRIVATE drift_dsp juce::juce_audio_utils PUBLIC juce::juce_recommended_config_flags)
   add_executable(drift_plugin_tests tests/PluginTests.cpp)
   target_link_libraries(drift_plugin_tests PRIVATE DriftBrigade juce::juce_audio_utils)
-  add_test(NAME plugin_state_and_routing COMMAND drift_plugin_tests)
+  if(DRIFT_INTERNAL_BBD_HOST_TEST)
+    add_test(NAME plugin_internal_admission_and_routing COMMAND drift_plugin_tests)
+  else()
+    add_test(NAME plugin_state_and_routing COMMAND drift_plugin_tests)
+  endif()
+  if(DRIFT_BUILD_VST3_HOST_TESTS)
+    add_executable(drift_vst3_host_tests tests/VST3HostTests.cpp)
+    target_compile_definitions(drift_vst3_host_tests PRIVATE
+      JUCE_PLUGINHOST_VST3=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(drift_vst3_host_tests PRIVATE juce::juce_audio_processors)
+    add_dependencies(drift_vst3_host_tests DriftBrigade_VST3)
+    add_test(NAME vst3_loaded_in_host COMMAND drift_vst3_host_tests
+      "${CMAKE_CURRENT_BINARY_DIR}/DriftBrigade_artefacts/$<CONFIG>/VST3/${DRIFT_PRODUCT_NAME}.vst3")
+  endif()
 endif()
 
 # Separate instrumented DSP compilation: no reference or counters in drift_dsp.
@@ -265,6 +290,13 @@ if(DRIFT_SANITIZE AND NOT MSVC)
   target_link_options(drift_bbd_admission_tests PRIVATE -fsanitize=address,undefined)
 endif()
 add_test(NAME bbd_product_admission COMMAND drift_bbd_admission_tests)
+
+add_executable(drift_bbd_host_qualification tools/BBDHostQualification.cpp)
+target_link_libraries(drift_bbd_host_qualification PRIVATE drift_dsp)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_host_qualification PRIVATE -femulated-tls)
+endif()
+add_test(NAME bbd_host_lifecycle COMMAND drift_bbd_host_qualification --tests-only)
 
 # Keep DSP and frozen references on the same unfused arithmetic, including
 # toolchains that target FMA by default. Apply to inline DSP in callers too.

@@ -61,13 +61,34 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cmake -S . -B build -A x64
+      - run: cmake -S . -B build -A x64 -DDRIFT_BUILD_VST3_HOST_TESTS=ON
       - run: cmake --build build --config Release --parallel 2
       - run: ctest --test-dir build -C Release --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
           name: DriftBrigade-Windows
           path: build/DriftBrigade_artefacts/Release/
+  internal-bbd-plugin:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -A x64 -DDRIFT_INTERNAL_BBD_HOST_TEST=ON -DDRIFT_BUILD_VST3_HOST_TESTS=ON
+      - run: cmake --build build --config Release --target drift_plugin_tests drift_vst3_host_tests --parallel 2
+      - run: ctest --test-dir build -C Release -R 'plugin_internal|vst3_loaded' --output-on-failure
+  bbd-host-timing:
+    needs: [dsp, sanitize]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - run: cmake --build build --target drift_bbd_host_qualification --parallel 2
+      - run: python3 tools/run_bbd_host_qualification.py build/drift_bbd_host_qualification output/host --compile-commands build/compile_commands.json --environment ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DriftBrigade-M3.1D-Host-Timing-CI
+          path: output/host/
+          retention-days: 14
+          if-no-files-found: error
   bbd-performance-qualification:
     needs: [dsp, sanitize]
     runs-on: ubuntu-latest

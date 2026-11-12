@@ -15,11 +15,24 @@ int main(int argc, char** argv) {
         juce::MemoryBlock saved; a.getStateInformation(saved); b.setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));
         for(const auto& s : drift::parameterSpecs) check(a.state.getRawParameterValue(s.id)->load()==b.state.getRawParameterValue(s.id)->load(),"state round trip");
         const char bad[]="invalid"; b.setStateInformation(bad,sizeof(bad));
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+        using Outcome = drift::BBDPreparationOutcome;
+        b.prepareToPlay(48000, 17);
+        check(b.hostTestOutcome() == Outcome::BBD && !b.hostTestParametersAccepted(),
+              "internal scene starts admitted with out-of-envelope saved parameters");
+        b.releaseResources();
+        auto* center = b.state.getParameter("center");
+        center->setValueNotifyingHost(center->convertTo0to1(24.f));
+#endif
         for(double sr : {44100.,48000.,88200.,96000.}) {
             for(bool stereo : {false,true}) {
                 const auto set=stereo ? juce::AudioChannelSet::stereo() : juce::AudioChannelSet::mono();
                 juce::AudioProcessor::BusesLayout layout; layout.inputBuses.add(set); layout.outputBuses.add(set);
                 check(b.setBusesLayout(layout),"mono/stereo routing"); b.prepareToPlay(sr,17);
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+                check(b.hostTestOutcome() == (sr == 96000 ? Outcome::FallbackToDigital : Outcome::BBD)
+                          && b.hostTestParametersAccepted(), "internal host rate and restored controls");
+#endif
                 for(int n : {0,1,17,127,1024,8192}) {
                     juce::AudioBuffer<float> audio(stereo ? 2 : 1,n); audio.clear();
                     if(n>0) audio.setSample(0,0,1);
@@ -28,6 +41,7 @@ int main(int argc, char** argv) {
                     check(allocations.load()==before,"plugin callback allocation");
                     for(int ch=0;ch<audio.getNumChannels();++ch) for(int i=0;i<n;++i) check(std::isfinite(audio.getSample(ch,i)),"plugin finite output");
                 }
+                b.releaseResources();
             }
         }
         juce::AudioProcessor::BusesLayout upmix; upmix.inputBuses.add(juce::AudioChannelSet::mono()); upmix.outputBuses.add(juce::AudioChannelSet::stereo());
@@ -35,6 +49,14 @@ int main(int argc, char** argv) {
         b.state.getParameter("mix")->setValueNotifyingHost(0); b.prepareToPlay(48000,17);
         juce::AudioBuffer<float> audio(2,17); audio.clear(); audio.setSample(0,0,0.5f); audio.setSample(1,0,-0.8f);
         juce::MidiBuffer midi; b.processBlock(audio,midi); check(audio.getSample(0,0)==0.5f && audio.getSample(1,0)==0.5f,"mono input duplicated before DSP");
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+        center->setValueNotifyingHost(0);
+        b.state.getParameter("mix")->setValueNotifyingHost(1);
+        audio.clear(); audio.setSample(0, 0, .5f);
+        b.processBlock(audio, midi);
+        check(!b.hostTestParametersAccepted() && audio.getSample(0,0)==.5f,
+              "internal callback atomically rejects out-of-envelope snapshot");
+#endif
         std::unique_ptr<juce::AudioProcessorEditor> editor(b.createEditor()); editor->setSize(540,540); editor->setSize(1000,900);
         if(argc>1) {
             editor->setSize(660,600);

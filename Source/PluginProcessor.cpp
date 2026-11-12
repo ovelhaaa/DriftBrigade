@@ -1,11 +1,25 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+#include "dsp/BBDHostScene.h"
+#endif
 DriftProcessor::DriftProcessor()
     : AudioProcessor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true)
                                      .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       state(*this, nullptr, "DriftState", drift::makeParameterLayout()), reader(state) {}
 void DriftProcessor::prepareToPlay(double sampleRate, int) {
-    engine.setParameters(reader.read()); engine.prepare(sampleRate); setLatencySamples(0);
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+    hostScene = drift::bbdHostScene();
+    const auto parameters = reader.read();
+    const bool valid = drift::withinHostScene(parameters, hostScene.automation);
+    if (valid) hostScene.initial = parameters;
+    accepted.store(valid, std::memory_order_relaxed);
+    outcome.store(engine.prepareProduct(sampleRate, hostScene).outcome, std::memory_order_relaxed);
+#else
+    engine.setParameters(reader.read());
+    engine.prepare(sampleRate);
+#endif
+    setLatencySamples(0);
 }
 bool DriftProcessor::isBusesLayoutSupported(const BusesLayout& layout) const {
     const auto input = layout.getMainInputChannelSet(), output = layout.getMainOutputChannelSet();
@@ -18,7 +32,14 @@ void DriftProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     if (inputs == 1 && outputs == 2) buffer.copyFrom(1, 0, buffer, 0, 0, buffer.getNumSamples());
     for (int ch=inputs; ch<buffer.getNumChannels(); ++ch)
         if (!(inputs == 1 && ch == 1 && outputs == 2)) buffer.clear(ch, 0, buffer.getNumSamples());
-    engine.setParameters(reader.read());
+    const auto parameters = reader.read();
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+    const bool valid = drift::withinHostScene(parameters, hostScene.automation);
+    accepted.store(valid, std::memory_order_relaxed);
+    if (valid) engine.setParameters(parameters);
+#else
+    engine.setParameters(parameters);
+#endif
     engine.process(buffer.getArrayOfWritePointers(), static_cast<std::size_t>(outputs), static_cast<std::size_t>(buffer.getNumSamples()));
 }
 juce::AudioProcessorEditor* DriftProcessor::createEditor() { return new DriftEditor(*this); }

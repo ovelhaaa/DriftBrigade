@@ -1,5 +1,6 @@
 #include "AllocationTracker.h"
 #include "dsp/DriftEngine.h"
+#include "dsp/BBDHostScene.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -137,16 +138,9 @@ void physicalLimits() {
 }
 
 void automationAndReset() {
-    BBDAdmissionRequest request;
+    auto request = bbdHostScene();
     auto& lo = request.automation.minimum;
     auto& hi = request.automation.maximum;
-    lo[Motion] = .1; hi[Motion] = 10;
-    lo[Depth] = 0; hi[Depth] = .85;
-    lo[Center] = 22; hi[Center] = 30;
-    for (auto control : {Chaos, Coherence, Dynamics, Width, Feedback}) {
-        lo[control] = parameterSpecs[control].minimum;
-        hi[control] = parameterSpecs[control].maximum;
-    }
     request.initial = lo;
     auto incompatible = request;
     incompatible.automation.minimum[Center] = 2;
@@ -167,9 +161,11 @@ void automationAndReset() {
             engine.setParameters(p);
             reference.setParameters(p);
             valid &= engine.bbdAutomationStatus() == BBDAutomationStatus::Accepted;
+            p = (n / 211) % 2 ? lo : hi;
             p[Center] = 20;
             engine.setParameters(p);
             valid &= engine.bbdAutomationStatus() == BBDAutomationStatus::OutsideEnvelope;
+            p[Center] = request.initial[Center];
             p[Depth] = n % 2 ? std::numeric_limits<double>::infinity()
                              : std::numeric_limits<double>::quiet_NaN();
             engine.setParameters(p);
