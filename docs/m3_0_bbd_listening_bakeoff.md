@@ -190,8 +190,8 @@ the common trajectories were exact. These measurements select no musical winner.
 cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target drift_bbd_listening_bakeoff
 ctest --test-dir build -R bbd_listening_ --output-on-failure
-drift_bbd_listening_bakeoff output/DriftBrigade-M3.0-BBD-Listening-Bakeoff
-drift_bbd_listening_bakeoff output/m3_0_determinism_repeat
+./build/drift_bbd_listening_bakeoff output/DriftBrigade-M3.0-BBD-Listening-Bakeoff
+./build/drift_bbd_listening_bakeoff output/m3_0_determinism_repeat
 ```
 
 The renderer copies the guide and technical notes from the build's repository

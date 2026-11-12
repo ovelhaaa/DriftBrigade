@@ -98,6 +98,10 @@ def verify(root, compare=None, voice_retest=False, original=None):
     key = rows(root / "ANSWER_KEY.csv")
     assert len(key) == len(names) and {r["blind_filename"] for r in key} == set(names)
     mapping = {r["blind_filename"]: r for r in key}
+    sanity = rows(root / "objective" / "sanity_rates.csv")
+    expected_sanity = {(r["group"], r["candidate_id"], rate) for r in key for rate in ("44100", "48000", "88200")}
+    assert len(sanity) == 3 * len(names) and len(expected_sanity) == len(sanity)
+    assert {(r["group"], r["candidate"], r["sample_rate"]) for r in sanity} == expected_sanity
     score = rows(root / "LISTENING_SCORECARD.csv")
     assert len(score) == len(sizes) and {r["pair_group"] for r in score} == set(sizes)
     for row in score:
@@ -110,6 +114,7 @@ def verify(root, compare=None, voice_retest=False, original=None):
     matched_by_group = {}
     for filename in sorted(expected):
         row, path = indexed[filename], root / filename
+        assert row["version"] == path.parent.name, (filename, row["version"])
         for field, value in row.items():
             if value == "NA":
                 continue
@@ -169,6 +174,7 @@ def verify(root, compare=None, voice_retest=False, original=None):
                 assert abs(float(row["rms_matching_error_db"])) <= .1
             constant_gain_error = max(constant_gain_error, error)
             matched_by_group.setdefault(row["group"], []).append(measured)
+    assert set(matched_by_group) == set(sizes)
     for group, values in matched_by_group.items():
         assert len(values) == sizes[group]
         error = db(max(values) / min(values))
@@ -189,14 +195,10 @@ def verify(root, compare=None, voice_retest=False, original=None):
             assert len({r[field] for r in members}) == 1, (group, field)
     if voice_retest:
         verify_voice_controls(manifest, key, score, digests, original)
-    sanity = rows(root / "objective" / "sanity_rates.csv")
-    assert len(sanity) == 3 * len(names) and {r["sample_rate"] for r in sanity} == {"44100", "48000", "88200"}
     assert all(r["deterministic"] == "PASS" and r["allocations"] == "0" for r in sanity)
     assert all(r["clamps"] in ("0", "NA") and r["guards"] in ("0", "NA") for r in sanity)
     assert all(float(r["trajectory_error_seconds"]) == 0 for r in sanity if not r["group"].startswith("D"))
     if voice_retest:
-        assert {(r["group"], r["candidate"], r["sample_rate"]) for r in sanity} == {
-            (r["group"], r["candidate_id"], rate) for r in key for rate in ("44100", "48000", "88200")}
         assert all(r["digital_frozen_regression"] == "PASS" for r in sanity)
     reports = (("modulation", 6),) if voice_retest else (
         ("backend", 8), ("stage", 4), ("gain", 4), ("modulation", 6), ("bank", 4))

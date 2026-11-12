@@ -386,6 +386,7 @@ $("import-file").onchange = async event => {
         writeScore(rows) !== writeScore(imported) && !confirm("Substituir as avaliações atuais pelo CSV importado?")) return;
     rows = imported;
     current = rows.find(row => row.pair_group === current.pair_group);
+    renderScore();
     notice("Avaliação importada.");
     save();
     showResults();
