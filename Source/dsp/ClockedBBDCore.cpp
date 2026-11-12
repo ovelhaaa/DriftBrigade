@@ -3,10 +3,17 @@
 #include <cmath>
 #include <stdexcept>
 namespace drift {
-void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages) {
+void ClockedBBDCore::prepare(double hostSampleRate,std::size_t stages,double clockCeilingHz) {
     if(stages<2 || stages>65536 || stages%2) throw std::invalid_argument("BBD physical stages must be even, in [2,65536]");
     trace.hostRateWasNormalized=!std::isfinite(hostSampleRate) || hostSampleRate<minimumHostSampleRate || hostSampleRate>maximumHostSampleRate;
     sampleRate=trace.hostRateWasNormalized?48000.0:hostSampleRate;
+    const double schedulerCeiling=sampleRate*maximumEventsPerHostSample/2;
+    if (!std::isfinite(clockCeilingHz) || clockCeilingHz<0 ||
+        (clockCeilingHz>0 && clockCeilingHz<1))
+        throw std::invalid_argument("Invalid BBD clock ceiling");
+    maximumClockHz=clockCeilingHz>0 ? std::min(clockCeilingHz,schedulerCeiling) : 0;
+    delayFloor=static_cast<double>(stages)/(maximumClockHz>0 ? 2*maximumClockHz : 2*schedulerCeiling);
+    cappedEventBudget=static_cast<std::uint32_t>(std::ceil(2*maximumClockHz/sampleRate));
     storage.assign(stages/2,0.0);
 #ifdef DRIFT_BBD_INSTRUMENT
     captureTimes.assign(storage.size(),-1.0);
@@ -45,14 +52,15 @@ void ClockedBBDCore::reset() noexcept {
     trace.accumulatedClockPhase=0.0; trace.nextEdgeCaptures=true;
 }
 void ClockedBBDCore::setDelaySeconds(double seconds) noexcept {
-    const double minimum=static_cast<double>(trace.stageCount)/(sampleRate*maximumEventsPerHostSample);
     const double maximum=static_cast<double>(trace.stageCount)/2.0;
     const bool valid=std::isfinite(seconds);
     trace.requestedDelaySeconds=valid?seconds:maximum;
     if(storage.empty()) return;
-    trace.effectiveDelaySeconds=std::clamp(trace.requestedDelaySeconds,minimum,maximum);
+    trace.effectiveDelaySeconds=std::clamp(trace.requestedDelaySeconds,delayFloor,maximum);
     trace.wasClamped=!valid || trace.effectiveDelaySeconds!=trace.requestedDelaySeconds;
     trace.effectiveClockHz=static_cast<double>(trace.stageCount)/(2.0*trace.effectiveDelaySeconds);
+    if (maximumClockHz>0)
+        trace.effectiveClockHz=std::min(trace.effectiveClockHz,maximumClockHz);
     trace.signalSamplingRateHz=trace.effectiveClockHz;
     trace.signalNyquistHz=trace.effectiveClockHz/2.0;
     if(cachedClock!=trace.effectiveClockHz) {
@@ -70,8 +78,15 @@ double ClockedBBDCore::process(double input) noexcept {
     const double dt=1.0/sampleRate,increment=2.0*trace.effectiveClockHz/sampleRate;
     const double oldPhase=eventPhase;
     eventPhase+=increment;
-    const auto events=static_cast<std::uint32_t>(eventPhase);
-    eventPhase-=events;
+    auto events=static_cast<std::uint32_t>(eventPhase);
+    if (cappedEventBudget && events>cappedEventBudget) {
+        // A fractional phase very close to 1 can round up when added to
+        // an integer increment at the ceiling. Keep it pending.
+        events=cappedEventBudget;
+        eventPhase=1-std::numeric_limits<double>::epsilon()/2;
+    } else {
+        eventPhase-=events;
+    }
     trace.eventsThisHostSample=events; trace.capturesThisHostSample=trace.outputsThisHostSample=0;
     // Input samples are weighted Dirac impulses at interval start (Eq.4).
     // Output is observed at interval end; events on the boundary run first.

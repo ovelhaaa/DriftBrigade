@@ -31,6 +31,34 @@ add_executable(drift_analysis tools/Analysis.cpp)
 target_link_libraries(drift_analysis PRIVATE drift_dsp)
 add_executable(drift_bakeoff tools/Bakeoff.cpp)
 target_link_libraries(drift_bakeoff PRIVATE drift_dsp)
+# M3.0 offline bake-off: instrumentation and frozen Digital oracle only here.
+add_executable(drift_bbd_listening_bakeoff tools/BBDListeningBakeoff.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp
+  tests/reference_m26/DriftEngine.cpp)
+target_include_directories(drift_bbd_listening_bakeoff PRIVATE Source)
+target_compile_definitions(drift_bbd_listening_bakeoff PRIVATE DRIFT_BBD_INSTRUMENT=1)
+target_compile_definitions(drift_bbd_listening_bakeoff PRIVATE
+  DRIFT_LISTENING_DOCS="${CMAKE_CURRENT_SOURCE_DIR}/docs")
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_listening_bakeoff PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_listening_bakeoff PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_listening_bakeoff PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_listening_numerical COMMAND drift_bbd_listening_bakeoff --tests-only)
+add_test(NAME bbd_listening_voice_numerical COMMAND drift_bbd_listening_bakeoff --voice-tests-only)
+add_test(NAME bbd_listening_voice_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_listening_bakeoff>
+  -DTOOL_ARGS=--voice-retest
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-listening-voice-stream-tests
+  -DBLOCKED_ARTIFACT=LISTENING_SCORECARD.csv
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
+add_test(NAME bbd_listening_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
+  -DTOOL=$<TARGET_FILE:drift_bbd_listening_bakeoff>
+  -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/bbd-listening-stream-tests
+  -DBLOCKED_ARTIFACT=README.txt
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/BBDFailSafe.cmake)
 add_executable(drift_bbd_qualification tools/BBDQualification.cpp)
 target_link_libraries(drift_bbd_qualification PRIVATE drift_dsp)
 add_test(NAME bbd_artifact_stream_safety COMMAND ${CMAKE_COMMAND}
@@ -223,4 +251,29 @@ target_compile_definitions(drift_bbd_product_envelope_production_timing PRIVATE
   DRIFT_BBD_REALTIME_QUALIFY=1 DRIFT_PRODUCT_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
 if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(drift_bbd_product_envelope_production_timing PRIVATE -femulated-tls)
+endif()
+
+add_executable(drift_bbd_admission_tests tests/BBDProductAdmissionTests.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_admission_tests PRIVATE Source)
+target_compile_definitions(drift_bbd_admission_tests PRIVATE DRIFT_BBD_INSTRUMENT=1 DRIFT_BBD_ADMISSION_QUALIFY=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_admission_tests PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_admission_tests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_admission_tests PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_product_admission COMMAND drift_bbd_admission_tests)
+
+# Keep DSP and frozen references on the same unfused arithmetic, including
+# toolchains that target FMA by default. Apply to inline DSP in callers too.
+if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  get_property(drift_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(drift_target IN LISTS drift_targets)
+    get_target_property(drift_target_type ${drift_target} TYPE)
+    if(drift_target_type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY)$")
+      target_compile_options(${drift_target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
+    endif()
+  endforeach()
 endif()

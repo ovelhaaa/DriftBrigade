@@ -23,7 +23,9 @@ class ClockedBBDCore {
 public:
     static constexpr std::uint32_t maximumEventsPerHostSample=128;
     static constexpr double minimumHostSampleRate=8000.0,maximumHostSampleRate=384000.0;
-    void prepare(double hostSampleRate,std::size_t stages);
+    // A zero ceiling retains the research scheduler's original 128-edge limit.
+    void prepare(double hostSampleRate,std::size_t stages,double clockCeilingHz=0);
+    double minimumDelaySeconds() const noexcept { return delayFloor; }
     void reset() noexcept;
     void reseedCharacter(std::uint32_t seed) noexcept { character.reseed(seed); }
     void setDelaySeconds(double seconds) noexcept;
@@ -88,6 +90,8 @@ private:
     AsyncAnalogFilter inputFilter,outputFilter;
     AsyncAnalogTransition inputHost,outputHost,inputPeriod,outputPeriod;
     double cachedClock=-1;
+    double maximumClockHz=0, delayFloor=0;
+    std::uint32_t cappedEventBudget=0;
     double domainInputGain=1,domainOutputGain=1,nonlinearReference=1;
     void rebuildTransitions() noexcept;
     BBDDeviceCharacter character;

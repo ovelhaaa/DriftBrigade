@@ -1,7 +1,7 @@
 #pragma once
 #include "BBDCompander.h"
 namespace drift {
-enum class DelayBackend { DigitalFractional, ExperimentalBBD };
+enum class DelayBackend { DigitalFractional, ExperimentalBBD, Unavailable };
 enum class BBDFeedbackTopology { ExternalWetReturn };
 #ifdef DRIFT_BBD_REALTIME_QUALIFY
 enum class BBDQualificationFault {
@@ -49,7 +49,7 @@ public:
   // The core owns collection configuration; reset only clears measurements.
   BBDModulatedDelayVoice() noexcept { path.core.collectOperatingStats = true; }
 #endif
-  void prepare(double sr, const BBDVoiceConfig &c) {
+  void prepare(double sr, const BBDVoiceConfig &c, double clockCeilingHz = 0) {
     config = c;
     rate = sr;
     path.configure(c.compander);
@@ -59,14 +59,16 @@ public:
     auto character = c.character;
     character.seed = c.seed;
     path.core.setCharacterConfig(character);
-    path.prepare(sr, c.physicalStages);
+    path.prepare(sr, c.physicalStages, clockCeilingHz);
     rate = path.core.telemetry().hostRateWasNormalized ? 48000 : sr;
     pole = std::exp(-2 * pi * 5 / rate);
     reset(c.seed);
   }
-  void reset(std::uint32_t seed) noexcept {
+  void reset(std::uint32_t seed, double initialDelay = 0) noexcept {
     path.core.reseedCharacter(seed);
     path.reset();
+    if (initialDelay > 0)
+      path.setDelaySeconds(initialDelay);
     previousWet = previousInput = dcState = 0;
 #ifdef DRIFT_BBD_INSTRUMENT
     hiddenClamps = numericalGuards = 0;
@@ -93,8 +95,7 @@ public:
     return dcState;
   }
   double minimumDelaySeconds() const noexcept {
-    return double(config.physicalStages) /
-           (rate * ClockedBBDCore::maximumEventsPerHostSample);
+    return path.core.minimumDelaySeconds();
   }
   double maximumDelaySeconds() const noexcept {
     return double(config.physicalStages) / 2;

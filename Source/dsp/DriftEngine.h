@@ -1,5 +1,5 @@
 #pragma once
-#include "BBDModulatedDelayVoice.h"
+#include "BBDProductAdmission.h"
 #include "DepthMapping.h"
 #include "EnvelopeFollower.h"
 #include "FractionalDelay.h"
@@ -27,8 +27,8 @@ class DriftEngine {
 public:
     // Configuration is immutable after prepare: no callback reconstruction.
     bool setDelayBackend(DelayBackend value, BBDVoiceConfig config = BBDVoiceConfig::fullResearchFixture()) noexcept {
-        if (prepared) return false;
-        backend = value; bbdConfig = config; return true;
+        if (prepared || value == DelayBackend::Unavailable) return false;
+        researchBackend = value; researchConfig = config; return true;
     }
   bool isPrepared() const noexcept { return prepared; }
 #ifdef DRIFT_BBD_REALTIME_QUALIFY
@@ -81,9 +81,9 @@ public:
   }
 #endif
 #endif
-  DelayBackend delayBackend() const noexcept { return backend; }
-    double minimumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? 4.0/sampleRate : double(bbdConfig.physicalStages)/(sampleRate*ClockedBBDCore::maximumEventsPerHostSample); }
-    double maximumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? .055 : double(bbdConfig.physicalStages)/2; }
+  DelayBackend delayBackend() const noexcept { return prepared ? backend : DelayBackend::Unavailable; }
+    double minimumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional ? 4.0/sampleRate : bbdDelays[0][0].minimumDelaySeconds(); }
+    double maximumDelaySeconds() const noexcept { return backend == DelayBackend::DigitalFractional || productActive ? .055 : double(bbdConfig.physicalStages)/2; }
     const BBDModulatedDelayVoice& bbdVoice(std::size_t ch, std::size_t band) const noexcept { return bbdDelays[ch][band]; }
 #ifdef DRIFT_BBD_INSTRUMENT
     void enableBBDOperatingInstrumentation(bool enabled) noexcept {
@@ -91,15 +91,27 @@ public:
     }
 #endif
     void prepare(double sr, std::uint32_t seed = 0x44524946u);
+    // Call with audio stopped. Product admission is explicit for each prepare.
+    BBDAdmissionResult prepareProduct(double sr, const BBDAdmissionRequest&,
+                                      std::uint32_t seed = 0x44524946u) noexcept;
+    const BBDAdmissionResult& bbdAdmission() const noexcept { return admission; }
+    // Read on the audio thread or with processing stopped.
+    BBDAutomationStatus bbdAutomationStatus() const noexcept { return automationStatus; }
+#ifdef DRIFT_BBD_ADMISSION_QUALIFY
+    void qualificationFailPrepare(bool bbd, bool digital) noexcept {
+        failBBDPrepare = bbd;
+        failDigitalPrepare = digital;
+    }
+#endif
     void reset(std::uint32_t seed = 0x44524946u) noexcept;
     void setParameters(const EngineParameters& p) noexcept;
     void process(float* const* channels, std::size_t channelCount, std::size_t samples) noexcept;
     std::array<double, 2> processSample(double left, double right, bool mono = false) noexcept;
     const Telemetry& telemetry() const noexcept { return trace; }
-    void usePerceptualDepth(bool enabled) noexcept { perceptualDepth = enabled; }
+    void usePerceptualDepth(bool enabled) noexcept { if (!productActive) perceptualDepth = enabled; }
     void setOrganicVariant(OrganicVariant value) noexcept;
     void setBankMode(BankMode value) noexcept;
-    void setDynamicsMode(DynamicsMode value) noexcept { dynamicsMode = value; }
+    void setDynamicsMode(DynamicsMode value) noexcept { if (!productActive) dynamicsMode = value; }
     std::size_t delayCapacity() const noexcept { return delays[0][0].capacity(); }
     // Two successive variance-preserving coherence/stereo sums each have a
     // conservative sqrt(2) magnitude factor: combined bound = 2*source bound.
@@ -107,9 +119,18 @@ public:
         return 2*OrganicModulator::maximumMagnitude(value);
     }
 private:
+    void prepareBackend(double rate, std::uint32_t seed, double clockCeilingHz = 0);
+    void resetState(std::uint32_t seed) noexcept;
+    DelayBackend researchBackend = DelayBackend::DigitalFractional;
+    BBDVoiceConfig researchConfig;
     DelayBackend backend = DelayBackend::DigitalFractional;
     BBDVoiceConfig bbdConfig;
-    bool prepared = false;
+    BBDAdmissionResult admission;
+    BBDAutomationStatus automationStatus = BBDAutomationStatus::Inactive;
+    bool prepared = false, productActive = false;
+#ifdef DRIFT_BBD_ADMISSION_QUALIFY
+    bool failBBDPrepare = false, failDigitalPrepare = false;
+#endif
 #ifdef DRIFT_BBD_REALTIME_QUALIFY
   double qualificationCenter = 0;
 #endif
