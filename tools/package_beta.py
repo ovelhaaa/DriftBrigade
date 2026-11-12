@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Package the DriftBrigade M3.2 Windows x64 Friends Beta distribution ZIP."""
+"""Package the DriftBrigade M3.2.1 Windows x64 Friends Beta distribution ZIP."""
 
 from __future__ import annotations
 
 import argparse
 import datetime
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -24,15 +25,27 @@ def git_rev_parse(repo_root: pathlib.Path, short: bool = False) -> str:
         return "unknown"
 
 
+def read_cmake_versions(repo_root: pathlib.Path) -> tuple[str, str]:
+    cmake_text = (repo_root / "CMakeLists.txt").read_text(encoding="utf-8")
+    proj_match = re.search(r"project\s*\(\s*DriftBrigade\s+VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake_text)
+    if not proj_match:
+        raise RuntimeError("Could not parse project(DriftBrigade VERSION X.Y.Z) from CMakeLists.txt")
+    numeric_version = proj_match.group(1)
+
+    suffix_match = re.search(r'set\s*\(\s*DRIFT_RELEASE_SUFFIX\s+"([^"]*)"', cmake_text)
+    suffix = suffix_match.group(1) if suffix_match else "-beta.1"
+    return numeric_version, f"{numeric_version}{suffix}"
+
+
 def write_text(path: pathlib.Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
 
 
-def build_install_readme(version_tag: str, commit_sha: str) -> str:
+def build_install_readme(version_tag: str, numeric_version: str, commit_sha: str) -> str:
     return f"""# DRIFT BRIGADE — Guia de Instalacao (Friends Beta)
 
-Versao: `{version_tag}`
+Versao do Pacote: `{version_tag}` (VST3 / CMake Version: `{numeric_version}`)
 Commit: `{commit_sha}`
 Plataforma: Windows x64 (VST3 + Standalone)
 
@@ -42,12 +55,12 @@ Plataforma: Windows x64 (VST3 + Standalone)
 
 ## Conteudo do Pacote
 
-- `VST3/DRIFT BRIGADE.vst3/` — Bundle oficial do plugin VST3 (64-bit) para DAWs no Windows.
+- `VST3/DRIFT BRIGADE.vst3/` — Bundle oficial do plugin VST3 (64-bit, v`{numeric_version}`) para DAWs no Windows.
 - `Standalone/DRIFT BRIGADE.exe` — Aplicativo independente para testar rapidamente sem abrir uma DAW.
 - `README_USO.md` — Guia rapido dos controles, Motion Field e Quick Starts.
 - `BETA_TEST_GUIDE.md` — Roteiro de avaliacao musical e modelo para reportar problemas.
 - `CHANGELOG.md` — Historico de mudancas desta versao beta.
-- `VERSION.txt` — Identificacao tecnica da build e commit.
+- `VERSION.txt` — Identificacao tecnica da build, versao e commit.
 
 ---
 
@@ -59,10 +72,10 @@ Plataforma: Windows x64 (VST3 + Standalone)
    C:\\Program Files\\Common Files\\VST3\\
    ```
 3. Abra sua DAW (REAPER, Ableton Live, Cubase, Studio One, FL Studio, Bitwig, etc.) e execute o re-scan de plugins VST3 (se necessario).
-4. Procure por **DRIFT BRIGADE** (fabricante: **Drift Audio**).
+4. Procure por **DRIFT BRIGADE** (fabricante: **Drift Audio**, versao reportada ao host: `{numeric_version}`).
 
-### Atualizacao de Versoes de Desenvolvimento
-O identificador do plugin VST3 (`audio.driftbrigade.m1` / `DrBg`) e o formato de estado (`schema=1`) foram preservados. Voce pode substituir o bundle `DRIFT BRIGADE.vst3` existente sem perder os ajustes salvos em projetos anteriores.
+### Compatibilidade de Projetos e Estado
+O identificador do plugin VST3 (`audio.driftbrigade.m1` / `DrBg`) e o formato de estado (`schema=1`) foram integralmente preservados. Voce pode substituir o bundle `DRIFT BRIGADE.vst3` existente sem perder os ajustes e automacoes salvos em projetos anteriores.
 
 ---
 
@@ -80,26 +93,33 @@ def build_usage_readme(version_tag: str) -> str:
 
 ---
 
+## Identidade Visual: Precision Instrument
+
+A interface combina um chassi **off-white quente (`#F0EDE6`)**, paineis de controle em **grafite neutro (`#292B2D`)**, visor rebaixado quase preto (`#17191B`) e **laranja (`#F36B2B`)** como unica cor cromatica de destaque para leitura clara e conforto visual em sessoes prolongadas.
+
+---
+
 ## Pontos de Partida: QUICK STARTS
 
-No topo direito da interface, escolha um dos tres pontos de partida musicais:
+No topo direito da interface, escolha um dos tres seletores de partida musical:
 
 - **SUBTLE:** Movimento discreto e coeso, preservando a definicao da fonte com abertura estereo natural. Ideal para violoes, vozes, Rhodes e synths principais.
 - **WIDE:** Chorus aberto e expressivo, explorando desacoplamento entre bandas (`Coherence 30%`) e largura estereo (`Width 90%`). Ideal para guitarras limpas, teclados e camadas estereo.
 - **DRIFT:** Movimento organico profundo e irregular (`Chaos 82%`, `Center 18 ms`, `Feedback 38%`). Ideal para pads, cordas, texturas e ambiencias.
 
-Apos clicar em qualquer Quick Start, todos os nove controles continuam totalmente livres para edicao e automacao.
+Apos selecionar qualquer Quick Start, todos os nove controles continuam totalmente livres para edicao e automacao.
 
 ---
 
 ## Visualizador Central: MOTION FIELD
 
-O **Motion Field** apresenta em tempo real a representacao parametrica das **quatro bandas de frequencia** (`B1 LOW`, `B2 LO-MID`, `B3 HI-MID`, `B4 HIGH`) nos canais esquerdo (**ciano**) e direito (**ambar**):
+O **Motion Field** apresenta em tempo real a representacao parametrica das **quatro bandas de frequencia** (`B1 LOW`, `B2 LO-MID`, `B3 HI-MID`, `B4 HIGH`) nos canais esquerdo e direito usando um sistema grafico monocromatico laranja:
 
-- **Painel Principal (Esquerda):** Trajetorias de modulacao no tempo, refletindo velocidade (`Motion`), amplitude (`Depth`), irregularidade (`Chaos`), acoplamento entre bandas (`Coherence`), abertura L/R (`Width`), sensibilidade dinamica (`Dynamics`), caudas de realimentacao (`Feedback`) e balanco seco/processado (`Mix`).
-- **Escopo Estereo e Janela de Atraso (Direita):** Orbita estereo das quatro bandas e barra logaritmica (`0.3 - 30 ms`) indicando a posicao de `Center` e a excursao ativa.
-- **Botao LIVE / HOLD:** Permite pausar a animacao (30 FPS) a qualquer momento.
-- *Nota de honestidade visual:* O Motion Field e uma visualizacao fiel do comportamento dos parametros configurados, funcionando mesmo sem sinal de audio na entrada.
+- **Canal Esquerdo (`LEFT`):** Linha laranja continua mais espessa com ponto cheio (`●─── LEFT`).
+- **Canal Direito (`RIGHT`):** Linha laranja tracejada com opacidade diferenciada e ponto anelar vazado (`○- - RIGHT`).
+- **Orbita Estereo e Janela de Atraso (Direita):** Reticulo minimalista da orbita estereo das quatro bandas e barra logaritmica (`0.3 - 30 ms`) com marcador de `Center`, intervalo estimado de excursao (`EST. EXCURSION`) calculado com a taxa de amostragem real do host e indicadores de `Dynamics`, `Feedback` e sample rate.
+- **Botao LIVE / HOLD:** Em `LIVE`, anima as trajetorias a 30 FPS. Em `HOLD`, congela o traco das curvas para inspecao estatica enquanto mantem todos os indicadores, valores numericos, janela de atraso e selecao de Quick Starts atualizados em tempo real.
+- *Nota de honestidade visual:* O Motion Field e uma estimativa parametrica fiel do modulador e dos limites do modelo `DigitalFractional`, funcionando mesmo sem sinal de audio na entrada.
 
 ---
 
@@ -124,33 +144,38 @@ O **Motion Field** apresenta em tempo real a representacao parametrica das **qua
 - **Arraste vertical/horizontal:** Ajusta o valor do knob.
 - **Ctrl / Alt / Command + Arraste:** Ajuste fino de precisao.
 - **Duplo clique no knob:** Restaura imediatamente o valor padrao de fabrica.
-- **Clique na caixa numerica:** Permite digitar o valor exato pelo teclado.
+- **Clique na caixa numerica:** Permite digitar o valor exato pelo teclado (em `Hz`, `ms` ou `%`).
 """
 
 
-def build_changelog(version_tag: str, commit_sha: str) -> str:
+def build_changelog(version_tag: str, numeric_version: str, commit_sha: str) -> str:
     today = datetime.date.today().isoformat()
     return f"""# Changelog — DRIFT BRIGADE
 
-## [{version_tag}] — {today} (Friends Beta MVP — M3.2)
+## [{version_tag}] — {today} (Friends Beta MVP — M3.2.1 Visual Overhaul & Polish)
 
+Versao VST3 / CMake: `{numeric_version}`
 Commit de referencia: `{commit_sha}`
 
-### Adicionado
-- **Nova Interface Profissional (960x600 redimensionavel):** Identidade visual original em grafite escuro, ciano mineral e ambar suave (`DriftLookAndFeel`, `DriftKnob`, `ParameterSection`).
-- **Visualizador Parametrico `MotionField` (30 FPS):** Representacao em tempo real das quatro trajetorias multibanda e orbita estereo L/R respondendo aos 9 parametros, com modo `LIVE / HOLD` e zero trabalho no callback de audio.
-- **Tres Quick Starts (`SUBTLE`, `WIDE`, `DRIFT`):** Pontos de partida musicais integrados ao APVTS e automacao do host.
-- **Interacoes Refinadas nos Controles:** Indicador do valor default no anel de cada knob, duplo clique para reset, ajuste fino com tecla modificadora, edicao numerica direta e tooltips explicativos em portugues.
-- **Pacote de Distribuicao Friends Beta (Windows x64):** Bundle VST3 + Standalone + documentacao de instalacao, uso e roteiro de feedback.
+### Refinado / Corrigido (M3.2.1)
+- **Nova Identidade Visual (Precision Instrument):** Chassi off-white quente (`#F0EDE6`), paineis grafite neutros (`#292B2D`), interior de display quase preto (`#17191B`) e laranja (`#F36B2B`) como unica cor cromatica de destaque em toda a interface, eliminando completamente o antigo esquema ciano/ambar.
+- **Motion Field Monocromatico Laranja:** Diferenciacao grafica e cromatica clara entre `LEFT` (traco laranja continuo + ponto cheio) e `RIGHT` (traco laranja tracejado + ponto vazado), orbita estereo minimalista e janela de atraso de alto contraste.
+- **Modo LIVE / HOLD Desacoplado:** Em `HOLD`, o traco das trajetorias permanece congelado sem recomputacao continua, mas as leituras de parametros, `DELAY WINDOW`, `EST. EXCURSION` e o destaque dos `Quick Starts` continuam sincronizados em tempo real.
+- **Excursao com Sample Rate Real do Host:** O calculo de excursao estimada do `MotionField` agora consulta de forma lock-free a taxa de amostragem efetiva preparada pelo host (`44.1`, `48`, `88.2`, `96 kHz`, etc.) em vez de assumir `48 kHz` fixo.
+- **Apresentacao e Digitacao de Percentuais:** Validacao e arredondamento inteiro consistente na camada de apresentacao dos controles percentuais (`0 - 100%` e `Feedback 0 - 65%`), alem de formatacao de 2 casas decimais em `Motion` (`Hz`) e `Center` (`ms`).
+- **Consistencia de Versao (`{numeric_version}` / `{version_tag}`):** Alinhamento entre `CMakeLists.txt`, metadados do bundle VST3/Standalone e empacotamento beta.
 
 ### Congelado / Preservado (DSP Freeze)
-- Motor de audio publico congelado em **DigitalFractional + Wander + Gentle (4 bandas)** sem nenhuma alteracao sonora ou numerica em relacao a M3.1D.
-- Mantidos inalterados os 9 IDs de parametros, faixas, valores iniciais, suavizacao de 50 ms, serializacao XML (`schema=1`) e identidade VST3 (`audio.driftbrigade.m1` / `DrBg`).
+- Motor de audio publico congelado em **DigitalFractional + Wander + Gentle (4 bandas)** sem nenhuma alteracao sonora ou numerica em relacao a M3.1D / M3.2.
+- Mantidos inalterados os 9 IDs de parametros, faixas internas, valores iniciais, suavizacao de 50 ms, serializacao XML (`schema=1`) e identidade VST3 (`audio.driftbrigade.m1` / `DrBg`).
 - Backend experimental `Balanced1024 BBD` mantido estritamente isolado na infraestrutura interna de qualificacao.
 """
 
 
 def main() -> int:
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    cmake_numeric_version, cmake_release_version = read_cmake_versions(repo_root)
+
     parser = argparse.ArgumentParser(description="Package DriftBrigade Windows x64 Friends Beta.")
     parser.add_argument("--build-dir", required=True, type=pathlib.Path,
                         help="CMake build directory containing DriftBrigade_artefacts.")
@@ -158,11 +183,16 @@ def main() -> int:
                         help="Output directory for staging and final ZIP archive.")
     parser.add_argument("--config", default="Release",
                         help="Build configuration (default: Release).")
-    parser.add_argument("--version", default="0.2.0-beta.1",
-                        help="Beta version string.")
+    parser.add_argument("--version", default=cmake_release_version,
+                        help=f"Beta version string (default from CMakeLists.txt: {cmake_release_version}).")
     args = parser.parse_args()
 
-    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    if not args.version.startswith(cmake_numeric_version):
+        raise RuntimeError(
+            f"Version mismatch: CMakeLists.txt version is {cmake_numeric_version}, "
+            f"but --version {args.version} does not start with {cmake_numeric_version}."
+        )
+
     artefacts_root = args.build_dir / "DriftBrigade_artefacts" / args.config
     if not artefacts_root.exists():
         # Single-config generators may place artefacts directly or under Release
@@ -188,10 +218,10 @@ def main() -> int:
 
     full_sha = git_rev_parse(repo_root, short=False)
     short_sha = git_rev_parse(repo_root, short=True)
-    package_Folder_name = f"DriftBrigade-{args.version}-win-x64"
+    package_folder_name = f"DriftBrigade-{args.version}-win-x64"
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    staging_dir = args.output_dir / package_Folder_name
+    staging_dir = args.output_dir / package_folder_name
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -204,9 +234,11 @@ def main() -> int:
     shutil.copy2(standalone_exe, staging_dir / "Standalone" / "DRIFT BRIGADE.exe")
 
     # 3. Generate READMEs, CHANGELOG, VERSION.txt, and copy BETA_TEST_GUIDE.md
-    write_text(staging_dir / "README_INSTALACAO.md", build_install_readme(args.version, full_sha))
+    write_text(staging_dir / "README_INSTALACAO.md",
+               build_install_readme(args.version, cmake_numeric_version, full_sha))
     write_text(staging_dir / "README_USO.md", build_usage_readme(args.version))
-    write_text(staging_dir / "CHANGELOG.md", build_changelog(args.version, full_sha))
+    write_text(staging_dir / "CHANGELOG.md",
+               build_changelog(args.version, cmake_numeric_version, full_sha))
 
     beta_guide_src = repo_root / "docs" / "mvp_beta_test_guide.md"
     if beta_guide_src.exists():
@@ -215,20 +247,23 @@ def main() -> int:
     now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     version_info = (
         f"Product: DRIFT BRIGADE (Friends Beta)\n"
-        f"Version: {args.version}\n"
+        f"ReleaseVersion: {args.version}\n"
+        f"CMakeNumericVersion: {cmake_numeric_version}\n"
         f"Commit: {full_sha}\n"
         f"ShortCommit: {short_sha}\n"
         f"BuildConfig: {args.config}\n"
         f"Platform: Windows-x64\n"
         f"DSPBackend: DigitalFractional / Wander / Gentle (Frozen)\n"
         f"VST3BundleID: audio.driftbrigade.m1\n"
+        f"VST3ManufacturerCode: Drft\n"
         f"VST3PluginCode: DrBg\n"
+        f"StateSchema: 1\n"
         f"PackagedAtUTC: {now_utc}\n"
     )
     write_text(staging_dir / "VERSION.txt", version_info)
 
     # 4. Create ZIP archive
-    zip_path = args.output_dir / f"{package_Folder_name}.zip"
+    zip_path = args.output_dir / f"{package_folder_name}.zip"
     if zip_path.exists():
         zip_path.unlink()
 

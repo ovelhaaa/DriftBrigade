@@ -8,6 +8,10 @@ DriftProcessor::DriftProcessor()
                                      .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       state(*this, nullptr, "DriftState", drift::makeParameterLayout()), reader(state) {}
 void DriftProcessor::prepareToPlay(double sampleRate, int) {
+    const double safeRate = (std::isfinite(sampleRate) && sampleRate > 0.0)
+        ? std::clamp(sampleRate, 44100.0, 192000.0)
+        : 48000.0;
+    preparedSampleRate.store(safeRate, std::memory_order_relaxed);
 #ifdef DRIFT_INTERNAL_BBD_HOST_TEST
     hostScene = drift::bbdHostScene();
     const auto parameters = reader.read();

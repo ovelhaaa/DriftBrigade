@@ -1,7 +1,7 @@
-# DRIFT BRIGADE — Guia de Teste da Versão Beta (M3.2 Friends Beta)
+# DRIFT BRIGADE — Guia de Teste da Versão Beta (M3.2.1 Friends Beta)
 
-Obrigado por testar a primeira versão beta do **DriftBrigade**!
-Esta versão traz o motor digital multibanda congelado (**DigitalFractional / Wander / Gentle**) com a nova interface **Motion Field** e os três pontos de partida **Quick Starts** (`SUBTLE`, `WIDE`, `DRIFT`).
+Obrigado por testar a versão beta do **DriftBrigade** (`v0.2.0-beta.1`)!
+Esta versão traz o motor digital multibanda congelado (**DigitalFractional / Wander / Gentle**) com a nova identidade visual **Precision Instrument** (Off-White + Grafite + Laranja), o visualizador **Motion Field** e os três pontos de partida **Quick Starts** (`SUBTLE`, `WIDE`, `DRIFT`).
 
 O objetivo desta rodada é avaliar o plugin em contextos reais de produção musical, mixagem e sound design.
 

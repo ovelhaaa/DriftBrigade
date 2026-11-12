@@ -25,12 +25,15 @@ public:
     void changeProgramName(int, const juce::String&) override {}
     void getStateInformation(juce::MemoryBlock&) override;
     void setStateInformation(const void*, int) override;
+    double effectiveSampleRate() const noexcept { return preparedSampleRate.load(std::memory_order_relaxed); }
     juce::AudioProcessorValueTreeState state;
 #ifdef DRIFT_INTERNAL_BBD_HOST_TEST
     drift::BBDPreparationOutcome hostTestOutcome() const noexcept { return outcome.load(std::memory_order_relaxed); }
     bool hostTestParametersAccepted() const noexcept { return accepted.load(std::memory_order_relaxed); }
 #endif
 private:
+    static_assert(std::atomic<double>::is_always_lock_free, "Sample rate read must be lock-free");
+    std::atomic<double> preparedSampleRate {48000.0};
 #ifdef DRIFT_INTERNAL_BBD_HOST_TEST
     static_assert(std::atomic<drift::BBDPreparationOutcome>::is_always_lock_free);
     static_assert(std::atomic<bool>::is_always_lock_free);

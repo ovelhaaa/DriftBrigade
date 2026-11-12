@@ -55,6 +55,8 @@ int main(int argc, char** argv) {
         const auto path = juce::File::getCurrentWorkingDirectory().getChildFile(argv[1]);
         format.findAllTypesForFile(types, path.getFullPathName());
         require(types.size() == 1, "expected one VST3 audio effect");
+        require(types[0]->version == "0.2.0", "expected VST3 bundle version 0.2.0");
+        require(types[0]->manufacturerName == "Drift Audio", "expected VST3 manufacturer Drift Audio");
         juce::String error;
         auto plugin = format.createInstanceFromDescription(*types[0], 44100, 512, error);
         if (!plugin) throw std::runtime_error(error.toStdString());

@@ -18,55 +18,60 @@ ParameterSection::ParameterSection(juce::AudioProcessorValueTreeState& state,
 }
 
 void ParameterSection::paint(juce::Graphics& g) {
-    const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
-    constexpr float corner = 6.0f;
+    const auto bounds = getLocalBounds().toFloat().reduced(0.5f);
+    constexpr float corner = 5.5f;
 
-    juce::ColourGradient panelGrad(Palette::panelBg.brighter(0.03f), bounds.getX(), bounds.getY(),
-                                   Palette::panelBg.darker(0.08f), bounds.getX(), bounds.getBottom(), false);
-    g.setGradientFill(panelGrad);
+    // Main graphite module body (#292B2D) over the off-white chassis
+    g.setColour(Palette::panelBg);
     g.fillRoundedRectangle(bounds, corner);
 
-    g.setColour(Palette::borderSubtle);
+    // Top header band inside the module
+    const float headerH = std::clamp(bounds.getHeight() * 0.15f, 23.0f, 30.0f);
+    const juce::Rectangle<float> headerBgRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f,
+                                              bounds.getWidth() - 2.0f, headerH);
+    g.setColour(Palette::panelRecessed);
+    g.fillRoundedRectangle(headerBgRect, corner);
+    g.fillRect(bounds.getX() + 1.0f, bounds.getY() + headerH - corner, bounds.getWidth() - 2.0f, corner);
+
+    g.setColour(Palette::panelBorder);
     g.drawRoundedRectangle(bounds, corner, 1.0f);
 
-    // Top header strip inside the bay
-    const float headerH = std::clamp(bounds.getHeight() * 0.145f, 22.0f, 30.0f);
-    const juce::Rectangle<float> headerRect(bounds.getX() + 10.0f, bounds.getY() + 4.0f,
-                                            bounds.getWidth() - 20.0f, headerH - 4.0f);
+    const juce::Rectangle<float> headerRect(bounds.getX() + 10.0f, bounds.getY(),
+                                            bounds.getWidth() - 20.0f, headerH);
 
-    const juce::Colour accent = (groupIndex == 2) ? Palette::accentAmber : Palette::accentCyan;
-    g.setColour(accent);
-    g.fillRoundedRectangle(bounds.getX() + 10.0f, bounds.getY() + 8.0f, 3.0f, headerH - 12.0f, 1.5f);
+    // Minimalist orange index bar
+    g.setColour(Palette::accentOrange);
+    g.fillRoundedRectangle(bounds.getX() + 10.0f, bounds.getY() + (headerH - 11.0f) * 0.5f, 3.0f, 11.0f, 1.2f);
 
-    g.setFont(DriftLookAndFeel::makeTechnicalFont(std::clamp(headerH * 0.45f, 10.5f, 12.5f), true));
-    g.setColour(Palette::textPrimary);
+    g.setFont(DriftLookAndFeel::makeTechnicalFont(std::clamp(headerH * 0.44f, 10.5f, 12.5f), true));
+    g.setColour(Palette::textOnPanel);
     g.drawText(title, static_cast<int>(headerRect.getX() + 9.0f), static_cast<int>(headerRect.getY()),
-               static_cast<int>(headerRect.getWidth() * 0.55f), static_cast<int>(headerRect.getHeight()),
+               static_cast<int>(headerRect.getWidth() * 0.52f), static_cast<int>(headerRect.getHeight()),
                juce::Justification::centredLeft, false);
 
-    g.setFont(DriftLookAndFeel::makeTechnicalFont(std::clamp(headerH * 0.37f, 9.0f, 10.5f), false));
-    g.setColour(Palette::textMuted);
-    g.drawText(subtitle, static_cast<int>(headerRect.getX() + headerRect.getWidth() * 0.42f),
+    g.setFont(DriftLookAndFeel::makeTechnicalFont(std::clamp(headerH * 0.35f, 8.8f, 10.2f), false));
+    g.setColour(Palette::textOnPanelMuted);
+    g.drawText(subtitle, static_cast<int>(headerRect.getX() + headerRect.getWidth() * 0.40f),
                static_cast<int>(headerRect.getY()),
-               static_cast<int>(headerRect.getWidth() * 0.58f), static_cast<int>(headerRect.getHeight()),
+               static_cast<int>(headerRect.getWidth() * 0.60f), static_cast<int>(headerRect.getHeight()),
                juce::Justification::centredRight, false);
 
     // Subtle divider below section header
-    g.setColour(Palette::borderSubtle);
-    g.drawHorizontalLine(static_cast<int>(bounds.getY() + headerH), bounds.getX() + 8.0f, bounds.getRight() - 8.0f);
+    g.setColour(Palette::panelBorder);
+    g.drawHorizontalLine(static_cast<int>(bounds.getY() + headerH), bounds.getX() + 1.0f, bounds.getRight() - 1.0f);
 
-    // Subtle vertical dividers between the 3 knobs
+    // Discreet vertical dividers between the 3 knobs
     const float contentTop = bounds.getY() + headerH + 8.0f;
     const float contentBottom = bounds.getBottom() - 8.0f;
     const float thirdW = bounds.getWidth() / 3.0f;
-    g.setColour(Palette::borderSubtle.withAlpha(0.55f));
+    g.setColour(Palette::panelBorder.withAlpha(0.65f));
     g.drawVerticalLine(static_cast<int>(bounds.getX() + thirdW), contentTop, contentBottom);
     g.drawVerticalLine(static_cast<int>(bounds.getX() + thirdW * 2.0f), contentTop, contentBottom);
 }
 
 void ParameterSection::resized() {
     auto area = getLocalBounds().reduced(6, 4);
-    const int headerH = std::clamp(static_cast<int>(getHeight() * 0.145f), 22, 30);
+    const int headerH = std::clamp(static_cast<int>(getHeight() * 0.15f), 23, 30);
     area.removeFromTop(headerH + 2);
 
     const int knobW = area.getWidth() / 3;
