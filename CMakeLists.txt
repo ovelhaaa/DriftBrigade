@@ -95,13 +95,24 @@ if(DRIFT_BUILD_PLUGIN)
     PLUGIN_MANUFACTURER_CODE Drft PLUGIN_CODE ${drift_plugin_code} FORMATS VST3 Standalone
     PRODUCT_NAME "${DRIFT_PRODUCT_NAME}" IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE IS_MIDI_EFFECT FALSE COPY_PLUGIN_AFTER_BUILD FALSE)
-  target_sources(DriftBrigade PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/params/Parameters.cpp)
+  target_sources(DriftBrigade PRIVATE
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/params/Parameters.cpp
+    Source/ui/DriftLookAndFeel.cpp
+    Source/ui/DriftKnob.cpp
+    Source/ui/ParameterSection.cpp
+    Source/ui/QuickStartSelector.cpp
+    Source/ui/MotionField.cpp)
   target_include_directories(DriftBrigade PUBLIC Source "${CMAKE_CURRENT_BINARY_DIR}/generated")
   target_compile_definitions(DriftBrigade PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
   if(DRIFT_INTERNAL_BBD_HOST_TEST)
     target_compile_definitions(DriftBrigade PUBLIC DRIFT_INTERNAL_BBD_HOST_TEST=1)
   endif()
   target_link_libraries(DriftBrigade PRIVATE drift_dsp juce::juce_audio_utils PUBLIC juce::juce_recommended_config_flags)
+  if(MINGW)
+    target_link_options(DriftBrigade PUBLIC -static)
+  endif()
   add_executable(drift_plugin_tests tests/PluginTests.cpp)
   target_link_libraries(drift_plugin_tests PRIVATE DriftBrigade juce::juce_audio_utils)
   if(DRIFT_INTERNAL_BBD_HOST_TEST)
