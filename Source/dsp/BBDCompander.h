@@ -156,8 +156,8 @@ public:
     core.setOperatingDomain(gains.compressorToBBDGain,gains.bbdToExpanderGain,gains.nonlinearReferenceLevel);
   }
   const BBDGainStagingConfig& gainStaging() const noexcept { return gains; }
-  void prepare(double rate, std::size_t stages) {
-    core.prepare(rate, stages);
+  void prepare(double rate, std::size_t stages, double clockCeilingHz = 0) {
+    core.prepare(rate, stages, clockCeilingHz);
     const double effective =
         core.telemetry().hostRateWasNormalized ? 48000 : rate;
     dt = 1 / effective;

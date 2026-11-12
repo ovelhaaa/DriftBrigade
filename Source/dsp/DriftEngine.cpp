@@ -1,53 +1,199 @@
 #include "DriftEngine.h"
 #include <limits>
+#ifdef DRIFT_BBD_ADMISSION_QUALIFY
+#include <new>
+#endif
 namespace drift {
 namespace {
 constexpr std::array<double, 4> independentRates {0.91, 1.037, 1.083, 0.967};
 constexpr std::array<double, 4> stereoRates {1.113, 0.943, 1.057, 0.887};
 constexpr double dynamicsChaos = 0.20, dynamicsFeedback = 0.08, quietWetReduction = 0.55;
+constexpr double balancedClockCeiling = 384000, balancedEventsPerSample = 16;
+constexpr double excursionReserve = 0.85;
+
+bool validParameters(const EngineParameters& parameters) noexcept {
+    for (std::size_t i = 0; i < Count; ++i) {
+        const auto value = parameters.values[i];
+        const auto& spec = parameterSpecs[i];
+        if (!std::isfinite(value) || value < spec.minimum || value > spec.maximum)
+            return false;
+    }
+    return true;
+}
+
+bool contains(const BBDAutomationEnvelope& envelope, const EngineParameters& parameters) noexcept {
+    for (std::size_t i = 0; i < Count; ++i)
+        if (parameters.values[i] < envelope.minimum.values[i] ||
+            parameters.values[i] > envelope.maximum.values[i])
+            return false;
+    return true;
+}
+
+bool validProductHostRate(double rate) noexcept {
+    return std::isfinite(rate) && rate >= ClockedBBDCore::minimumHostSampleRate &&
+           rate <= ClockedBBDCore::maximumHostSampleRate;
+}
 } // namespace
+
+BBDAdmissionResult evaluateBBDAdmission(double sr, const BBDAdmissionRequest& request) noexcept {
+    BBDAdmissionResult result;
+    result.sampleRate = sr;
+    result.request = request;
+    result.status = BBDAdmissionStatus::InvalidConfiguration;
+    const auto& low = request.automation.minimum;
+    const auto& high = request.automation.maximum;
+    if (!validProductHostRate(sr) ||
+        request.physicalStages < 2 || request.physicalStages > 65536 || request.physicalStages % 2 ||
+        !std::isfinite(request.clockCeilingHz) || request.clockCeilingHz < 1 ||
+        !validParameters(low) || !validParameters(high) || !validParameters(request.initial) ||
+        !contains(request.automation, request.initial))
+        return result;
+
+    if (request.profile != BBDProductProfile::Balanced1024 || request.physicalStages != 1024 ||
+        request.gainProfile != BBDHeadroomProfile::Nominal) {
+        result.status = BBDAdmissionStatus::UnsupportedProfile;
+        return result;
+    }
+    if (sr != 44100 && sr != 48000 && sr != 88200) {
+        result.status = BBDAdmissionStatus::UnsupportedSampleRate;
+        return result;
+    }
+    result.maximumClockHz = std::min({balancedClockCeiling, request.clockCeilingHz,
+                                     balancedEventsPerSample * sr / 2});
+    result.minimumDelaySeconds = double(request.physicalStages) / (2 * result.maximumClockHz);
+    if (request.clockCeilingHz > balancedClockCeiling) {
+        result.status = BBDAdmissionStatus::ClockLimitExceeded;
+        return result;
+    }
+    const double minimumCenter = low[Center] * .001;
+    const double maximumCenter = high[Center] * .001;
+    if (minimumCenter < result.minimumDelaySeconds) {
+        result.status = BBDAdmissionStatus::CenterBelowFloor;
+        return result;
+    }
+
+    // Depth is monotone in its control. For fixed Depth, the map is affine
+    // below 4 Hz and non-increasing above 4 Hz, including the 9 Hz plateau.
+    const double knee = std::clamp(4.0, low[Motion], high[Motion]);
+    result.maximumExcursionSeconds = std::min(minimumCenter - result.minimumDelaySeconds,
+                                               result.maximumDelaySeconds - maximumCenter)
+        * excursionReserve / DriftEngine::combinedModulationBound(OrganicVariant::Wander);
+    const double requestedExcursion = std::max(depthSeconds(low[Motion], high[Depth]),
+                                                depthSeconds(knee, high[Depth]));
+    result.status = requestedExcursion <= result.maximumExcursionSeconds
+        ? BBDAdmissionStatus::Admitted : BBDAdmissionStatus::ExcursionOutOfRange;
+    return result;
+}
+
 void DriftEngine::setOrganicVariant(OrganicVariant value) noexcept {
+    if (productActive) return;
     organicVariant=value; common.setVariant(value);
     for(auto& m: independent) m.setVariant(value);
     for(auto& m: stereo) m.setVariant(value);
 }
 void DriftEngine::setBankMode(BankMode value) noexcept {
+    if (productActive) return;
     bankMode=value; for(auto& b:banks) b.setMode(value);
 }
 void DriftEngine::prepare(double sr, std::uint32_t seed) {
-  prepared = false; // Failed prepare cannot leave a partially initialized
-                    // engine active.
-  sampleRate = bounded(sr, 44100, 192000);
+    prepared = productActive = false;
+    admission = {};
+    automationStatus = BBDAutomationStatus::Inactive;
+    backend = researchBackend;
+    bbdConfig = researchConfig;
+    prepareBackend(bounded(sr, 44100, 192000), seed);
+}
+
+BBDAdmissionResult DriftEngine::prepareProduct(double sr, const BBDAdmissionRequest& request,
+                                              std::uint32_t seed) noexcept {
+    // Copy before mutating the stored result: callers can reuse its request.
+    auto result = evaluateBBDAdmission(sr, request);
+    prepared = productActive = false;
+    automationStatus = BBDAutomationStatus::Inactive;
+    trace = {};
+    setOrganicVariant(OrganicVariant::Wander);
+    setBankMode(BankMode::Gentle);
+    setDynamicsMode(DynamicsMode::Current);
+    usePerceptualDepth(true);
+    setParameters(result.request.initial);
+
+    if (result.status == BBDAdmissionStatus::Admitted) {
+        backend = DelayBackend::ExperimentalBBD;
+        bbdConfig = BBDVoiceConfig::fullResearchFixture();
+        productActive = true;
+        try {
+            prepareBackend(sr, seed, result.maximumClockHz);
+            result.preparedBackend = backend;
+            result.preparedSampleRate = sampleRate;
+            result.outcome = BBDPreparationOutcome::BBD;
+            automationStatus = BBDAutomationStatus::Accepted;
+        } catch (...) {
+            productActive = false;
+            result.status = BBDAdmissionStatus::PreparationFailed;
+        }
+    }
+    if (!prepared && validProductHostRate(sr)) {
+        backend = DelayBackend::DigitalFractional;
+        try {
+            prepareBackend(bounded(sr, 44100, 192000), seed);
+            result.preparedBackend = backend;
+            result.preparedSampleRate = sampleRate;
+            result.outcome = BBDPreparationOutcome::FallbackToDigital;
+        } catch (...) {
+            // Both attempts publish readiness only after all voices reset.
+            result.outcome = BBDPreparationOutcome::DigitalPreparationFailed;
+        }
+    }
+    admission = result;
+    return result;
+}
+
+void DriftEngine::prepareBackend(double rate, std::uint32_t seed, double clockCeilingHz) {
+    sampleRate = rate;
     for (auto& c : controls) c.prepare(sampleRate);
     for (auto& b : banks) b.prepare(sampleRate);
     if (backend == DelayBackend::DigitalFractional) {
-        for (auto& ch : delays) for (auto& d : ch) d.prepare(sampleRate);
+        for (auto& ch : delays) {
+            for (auto& d : ch) d.prepare(sampleRate);
+#ifdef DRIFT_BBD_ADMISSION_QUALIFY
+            if (failDigitalPrepare) throw std::bad_alloc();
+#endif
+        }
     } else {
         for (auto& ch : bbdDelays) for (std::size_t b=0;b<4;++b) {
             auto c=bbdConfig; c.seed=bbdBandSeed(seed ^ bbdConfig.seed,b);
-            ch[b].prepare(sampleRate,c);
+            ch[b].prepare(sampleRate,c,clockCeilingHz);
+#ifdef DRIFT_BBD_ADMISSION_QUALIFY
+            if (failBBDPrepare && b == 3) throw std::bad_alloc();
+#endif
         }
     }
     common.prepare(sampleRate);
     for (auto& m : independent) m.prepare(sampleRate);
     for (auto& m : stereo) m.prepare(sampleRate);
     envelope.prepare(sampleRate); envelopeControl.prepare(sampleRate);
-    reset(seed);
+    resetState(seed);
     prepared = true;
 }
 void DriftEngine::reset(std::uint32_t seed) noexcept {
+    if (prepared) resetState(seed);
+}
+
+void DriftEngine::resetState(std::uint32_t seed) noexcept {
     for (std::size_t i=0; i<Count; ++i) controls[i].reset(targets.values[i]);
     for (auto& b : banks) b.reset();
     if (backend == DelayBackend::DigitalFractional) {
         for (auto& ch : delays) for (auto& d : ch) d.reset();
     } else {
-        for (auto& ch : bbdDelays) for (std::size_t b=0;b<4;++b) ch[b].reset(bbdBandSeed(seed ^ bbdConfig.seed,b));
+        const double initialDelay = productActive ? targets[Center] * .001 : 0;
+        for (auto& ch : bbdDelays) for (std::size_t b=0;b<4;++b)
+            ch[b].reset(bbdBandSeed(seed ^ bbdConfig.seed,b), initialDelay);
     }
     common.reset(seed);
     for (std::size_t b=0; b<4; ++b) { independent[b].reset(seed ^ (0x9e3779b9u*static_cast<std::uint32_t>(b+1))); stereo[b].reset(seed ^ (0x85ebca6bu*static_cast<std::uint32_t>(b+5))); }
   double initialCenter = targets[Center] * 0.001;
 #ifdef DRIFT_BBD_REALTIME_QUALIFY
-  if (backend == DelayBackend::ExperimentalBBD && qualificationCenter > 0)
+  if (backend == DelayBackend::ExperimentalBBD && !productActive && qualificationCenter > 0)
     initialCenter = qualificationCenter;
 #endif
     for (auto &ch : currentDelays) {
@@ -58,6 +204,17 @@ void DriftEngine::reset(std::uint32_t seed) noexcept {
     envelope.reset(); envelopeControl.reset(0); trace = {};
 }
 void DriftEngine::setParameters(const EngineParameters& p) noexcept {
+    if (productActive) {
+        if (!validParameters(p)) {
+            automationStatus = BBDAutomationStatus::InvalidParameters;
+            return;
+        }
+        if (!contains(admission.request.automation, p)) {
+            automationStatus = BBDAutomationStatus::OutsideEnvelope;
+            return;
+        }
+        automationStatus = BBDAutomationStatus::Accepted;
+    }
     for (std::size_t i=0; i<Count; ++i) {
         const auto& spec = parameterSpecs[i];
         targets.values[i] = bounded(p.values[i], spec.minimum, spec.maximum);
@@ -93,16 +250,17 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
     const double maximumDelay = std::min(.055,maximumDelaySeconds());
   double requestedCenter = p[Center] * 0.001;
 #ifdef DRIFT_BBD_REALTIME_QUALIFY
-  if (backend == DelayBackend::ExperimentalBBD && qualificationCenter > 0)
+  if (backend == DelayBackend::ExperimentalBBD && !productActive && qualificationCenter > 0)
     requestedCenter = qualificationCenter;
 #endif
   const double center =
-      backend == DelayBackend::DigitalFractional
+      backend == DelayBackend::DigitalFractional || productActive
           ? requestedCenter
           : bounded(requestedCenter,minimumDelay,maximumDelay);
     const double bound = combinedModulationBound(organicVariant);
     trace.requestedExcursionSeconds = depthSeconds(p[Motion], p[Depth], perceptualDepth);
-    trace.actualExcursionSeconds = std::min(trace.requestedExcursionSeconds, (center-minimumDelay)*0.85/bound);
+    trace.actualExcursionSeconds = productActive ? trace.requestedExcursionSeconds
+        : std::min(trace.requestedExcursionSeconds, (center-minimumDelay)*0.85/bound);
     if (backend == DelayBackend::ExperimentalBBD) {
         trace.actualExcursionSeconds = std::max(0.0,trace.actualExcursionSeconds);
 #ifdef DRIFT_BBD_INSTRUMENT
@@ -119,7 +277,11 @@ std::array<double, 2> DriftEngine::processSample(double left, double right, bool
         trace.modulation[0][b] = base;
         trace.modulation[1][b] = mono ? base : stereoShared*base+stereoWeight*side;
         for (std::size_t ch=0; ch<2; ++ch) {
-            const double target = bounded(center+excursion*trace.modulation[ch][b], minimumDelay, maximumDelay);
+            const double requested = center+excursion*trace.modulation[ch][b];
+            const double target = bounded(requested, minimumDelay, maximumDelay);
+#ifdef DRIFT_BBD_INSTRUMENT
+            if (productActive && target != requested) ++trace.physicalLimitSamples;
+#endif
             // At most 1/4 sample per sample, even during large center automation.
             currentDelays[ch][b] += std::clamp(target-currentDelays[ch][b], -0.25/sampleRate, 0.25/sampleRate);
             trace.delaySeconds[ch][b] = currentDelays[ch][b];

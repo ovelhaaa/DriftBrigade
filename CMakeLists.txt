@@ -253,6 +253,19 @@ if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(drift_bbd_product_envelope_production_timing PRIVATE -femulated-tls)
 endif()
 
+add_executable(drift_bbd_admission_tests tests/BBDProductAdmissionTests.cpp
+  Source/dsp/DriftEngine.cpp Source/dsp/OrganicModulator.cpp Source/dsp/ClockedBBDCore.cpp)
+target_include_directories(drift_bbd_admission_tests PRIVATE Source)
+target_compile_definitions(drift_bbd_admission_tests PRIVATE DRIFT_BBD_INSTRUMENT=1 DRIFT_BBD_ADMISSION_QUALIFY=1)
+if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(drift_bbd_admission_tests PRIVATE -femulated-tls)
+endif()
+if(DRIFT_SANITIZE AND NOT MSVC)
+  target_compile_options(drift_bbd_admission_tests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(drift_bbd_admission_tests PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME bbd_product_admission COMMAND drift_bbd_admission_tests)
+
 # Keep DSP and frozen references on the same unfused arithmetic, including
 # toolchains that target FMA by default. Apply to inline DSP in callers too.
 if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
