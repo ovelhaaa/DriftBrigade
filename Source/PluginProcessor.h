@@ -26,7 +26,18 @@ public:
     void getStateInformation(juce::MemoryBlock&) override;
     void setStateInformation(const void*, int) override;
     juce::AudioProcessorValueTreeState state;
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+    drift::BBDPreparationOutcome hostTestOutcome() const noexcept { return outcome.load(std::memory_order_relaxed); }
+    bool hostTestParametersAccepted() const noexcept { return accepted.load(std::memory_order_relaxed); }
+#endif
 private:
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+    static_assert(std::atomic<drift::BBDPreparationOutcome>::is_always_lock_free);
+    static_assert(std::atomic<bool>::is_always_lock_free);
+    drift::BBDAdmissionRequest hostScene;
+    std::atomic<drift::BBDPreparationOutcome> outcome {drift::BBDPreparationOutcome::Unavailable};
+    std::atomic<bool> accepted {false};
+#endif
     drift::ParameterReader reader;
     drift::DriftEngine engine;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DriftProcessor)

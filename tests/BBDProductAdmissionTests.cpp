@@ -1,5 +1,6 @@
 #include "AllocationTracker.h"
 #include "dsp/DriftEngine.h"
+#include "dsp/BBDHostScene.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -136,26 +137,19 @@ void physicalLimits() {
           core.telemetry().accumulatedClockPhase < 1, "scheduler rounding at ceiling");
 }
 
-void automationAndReset() {
-    BBDAdmissionRequest request;
+void automationAndReset(double rate) {
+    auto request = bbdHostScene();
     auto& lo = request.automation.minimum;
     auto& hi = request.automation.maximum;
-    lo[Motion] = .1; hi[Motion] = 10;
-    lo[Depth] = 0; hi[Depth] = .85;
-    lo[Center] = 22; hi[Center] = 30;
-    for (auto control : {Chaos, Coherence, Dynamics, Width, Feedback}) {
-        lo[control] = parameterSpecs[control].minimum;
-        hi[control] = parameterSpecs[control].maximum;
-    }
     request.initial = lo;
     auto incompatible = request;
     incompatible.automation.minimum[Center] = 2;
-    check(evaluateBBDAdmission(48000, incompatible).status == Status::ExcursionOutOfRange,
+    check(evaluateBBDAdmission(rate, incompatible).status == Status::ExcursionOutOfRange,
           "unsafe combination inside box with valid initial parameters");
 
     DriftEngine engine, reference;
-    check(prepareProduct(engine, 48000, request, 77).status == Status::Admitted &&
-          prepareProduct(reference, 48000, request, 77).status == Status::Admitted, "automation box");
+    check(prepareProduct(engine, rate, request, 77).status == Status::Admitted &&
+          prepareProduct(reference, rate, request, 77).status == Status::Admitted, "automation box");
     engine.setOrganicVariant(OrganicVariant::PhaseDrift);
     engine.setBankMode(BankMode::Selective);
     engine.usePerceptualDepth(false);
@@ -167,9 +161,11 @@ void automationAndReset() {
             engine.setParameters(p);
             reference.setParameters(p);
             valid &= engine.bbdAutomationStatus() == BBDAutomationStatus::Accepted;
+            p = (n / 211) % 2 ? lo : hi;
             p[Center] = 20;
             engine.setParameters(p);
             valid &= engine.bbdAutomationStatus() == BBDAutomationStatus::OutsideEnvelope;
+            p[Center] = request.initial[Center];
             p[Depth] = n % 2 ? std::numeric_limits<double>::infinity()
                              : std::numeric_limits<double>::quiet_NaN();
             engine.setParameters(p);
@@ -199,7 +195,7 @@ void automationAndReset() {
     engine.reset(77);
     auto fresh = request;
     fresh.initial = hi;
-    prepareProduct(reference, 48000, fresh, 77);
+    prepareProduct(reference, rate, fresh, 77);
     for (int n = 0; n < 2048; ++n) {
         const double x = n == 0 ? 1.0 : 0.0;
         check(engine.processSample(x, x) == reference.processSample(x, x), "deterministic reset");
@@ -290,7 +286,8 @@ int main() {
     try {
         rateMatrix();
         physicalLimits();
-        automationAndReset();
+        for (double rate : {44100., 48000., 88200.})
+            automationAndReset(rate);
         fallbackAndRecovery();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

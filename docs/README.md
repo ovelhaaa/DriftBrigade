@@ -29,4 +29,12 @@ build-dsp/drift_bbd_listening_bakeoff --voice-retest output/m31b1-repeat
 python tools/verify_bbd_listening_bakeoff.py output/m31b1 --voice-retest --compare output/m31b1-repeat --original output/m30
 ```
 
-Open the packages in the [Listening Lab](../tools/listening-lab/README.md). GitHub Actions publishes the M1.1, M2 qualification and M3 listening bundles with repository-default retention. Build trees, WAVs and generated CSVs belong under ignored directories such as `build-dsp/` or `output/`.
+Open the packages in the [Listening Lab](../tools/listening-lab/README.md). GitHub Actions publishes the M1.1, M2 qualification and M3 listening bundles with repository-default retention, verified at 90 days on the consolidation workflow. Build trees, WAVs and generated CSVs belong under ignored directories such as `build-dsp/` or `output/`.
+
+## M3.1D host qualification
+
+See the [host validation report](m3_1d_host_validation.md) and [manual DAW procedure](m3_1d_daw_test_guide.md). The internal VST3 uses a separate build flag and plug-in identity.
+
+## Offline M1 telemetry
+
+Run `drift_analysis output/organic.csv 0.45 1 1` in the Release DSP build. Historical comparisons use `1 0.7 0 flange` for locked, `0 0.7 0 flange` for diffuse, `0.45 0 0` for periodic, `0.45 0.3 1` for dynamics and `0.45 1 1 raw-depth` for the internal depth-mapping comparison. Each run exports eight seconds of stereo WAV and 1 kHz telemetry. The WAV has a fixed 0.4 gain. Use `python tools/plot_analysis.py output/organic.csv` with matplotlib to inspect the telemetry.

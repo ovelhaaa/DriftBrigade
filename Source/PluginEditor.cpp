@@ -13,13 +13,26 @@ DriftEditor::DriftEditor(DriftProcessor& processor) : AudioProcessorEditor(proce
         attachments[i] = std::make_unique<Attachment>(processor.state, spec.id, sliders[i]);
     }
     setResizable(true, true); setResizeLimits(540, 540, 1000, 900); setSize(660, 600);
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+    startTimerHz(4);
+#endif
 }
 void DriftEditor::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(0xff1b2025));
     g.setColour(juce::Colours::whitesmoke); g.setFont(24.0f);
     g.drawText(drift::productName, 20, 12, getWidth()-40, 32, juce::Justification::centred);
     g.setFont(14.0f); g.setColour(juce::Colour(0xffb6c3cc));
+#ifdef DRIFT_INTERNAL_BBD_HOST_TEST
+    const auto& processor = static_cast<const DriftProcessor&>(*getAudioProcessor());
+    using Outcome = drift::BBDPreparationOutcome;
+    const auto outcome = processor.hostTestOutcome();
+    juce::String status = outcome == Outcome::BBD ? "Balanced1024 admitted"
+        : outcome == Outcome::FallbackToDigital ? "Digital fallback" : "Audio unavailable";
+    if (!processor.hostTestParametersAccepted()) status += " | parameter snapshot rejected";
+    g.drawText(status, 20, 45, getWidth()-40, 24, juce::Justification::centred);
+#else
     g.drawText("Multiscale Organic Modulator", 20, 45, getWidth()-40, 24, juce::Justification::centred);
+#endif
 }
 void DriftEditor::resized() {
     auto area = getLocalBounds().reduced(16); area.removeFromTop(62);
