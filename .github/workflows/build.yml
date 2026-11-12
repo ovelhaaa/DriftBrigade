@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   dsp:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -13,11 +14,14 @@ jobs:
       - run: ctest --test-dir build -C Release --output-on-failure
   sanitize:
     runs-on: ubuntu-latest
+    env:
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
-      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DDRIFT_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
+      # Keep Debug assertions and symbols while avoiding unoptimized DSP loops.
+      - run: cmake -S . -B build -DDRIFT_BUILD_PLUGIN=OFF -DDRIFT_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_CXX_FLAGS_DEBUG=-g -O1"
       - run: cmake --build build --parallel 2
-      - run: ctest --test-dir build --output-on-failure
+      - run: ctest --test-dir build --parallel 2 --output-on-failure
   bakeoff:
     needs: dsp
     runs-on: ubuntu-latest
